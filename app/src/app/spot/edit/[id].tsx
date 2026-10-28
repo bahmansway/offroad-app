@@ -2,7 +2,7 @@ import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { SpotForm } from '../../../components/SpotForm';
 import { RequireAuth } from '../../../components/RequireAuth';
-import { ErrorState, Loading } from '../../../components/ui';
+import { ErrorState, LoadingState as Loading } from '../../../components/ui';
 import { api } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
 import { useAsync } from '../../../lib/useAsync';
@@ -10,7 +10,7 @@ import { errorMessage } from '../../../lib/errors';
 import { useAuth } from '../../../lib/auth';
 import { sameId } from '../../../lib/format';
 import { NotOwner } from '../../../components/NotOwner';
-import { goBack } from '../../../components/Screen';
+import { goBack } from '../../../components/ui';
 
 export default function EditSpotScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

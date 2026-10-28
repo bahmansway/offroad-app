@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { Screen, TopBar, goBack } from '../../components/Screen';
 import { RequireAuth } from '../../components/RequireAuth';
-import { Button, ErrorState, FormError, Loading, Segmented, SwitchRow, TextField, s as ui } from '../../components/ui';
+import {
+  ChoicePills, Cell, ErrorState, FormError, LoadingState as Loading, NavScreen, PillButton, Section, SegmentedControl,
+  SwitchCell, TextField, Txt, goBack,
+} from '../../components/ui';
 import { api } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
 import { useAsync } from '../../lib/useAsync';
@@ -13,7 +15,6 @@ import { useAuth } from '../../lib/auth';
 import { NotOwner } from '../../components/NotOwner';
 import { sameId, CURRENCIES, formatNumber, isValidPrice, parsePriceInput } from '../../lib/format';
 import { between } from '../../lib/validation';
-import { colors, fonts, radius } from '../../lib/theme';
 import { MOD_CATEGORIES, type Currency, type ModCategory } from '../../lib/types';
 
 /** Add (no modId) or edit (modId) a modification of car `carId`. */
@@ -83,28 +84,18 @@ export default function ModScreen() {
   return (
     <RequireAuth>
       {!sameId(user?.id, car.owner.id) ? <NotOwner fallback={`/car/${carId}`} /> : (
-      <Screen>
-        <TopBar title={existing ? t('mod.editTitle') : t('mod.addTitle')} fallback={`/car/${carId}`} />
+      <NavScreen title={existing ? t('mod.editTitle') : t('mod.addTitle')} backLabel={t('common.cancel')} fallback={`/car/${carId}`}>
         <TextField label={t('mod.name')} placeholder={t('mod.namePlaceholder')} value={name} onChangeText={setName} maxLength={80} error={touched ? errors.name : null} />
 
-        <View style={ui.field}>
-          <Text style={ui.label}>{t('mod.category')}</Text>
-          <View style={styles.grid} accessibilityRole="radiogroup" accessibilityLabel={t('mod.category')}>
-            {MOD_CATEGORIES.map((c) => {
-              const on = c === category;
-              return (
-                <Pressable
-                  key={c}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: on }}
-                  onPress={() => setCategory(c)}
-                  style={[styles.cat, on ? styles.catOn : styles.catOff]}
-                >
-                  <Text style={[styles.catText, on && { color: colors.onAccent }]}>{d.mod.categories[c]}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+        <View style={{ gap: 6, marginHorizontal: -16 }}>
+          <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 36, textTransform: 'uppercase', letterSpacing: 0.2 }}>{t('mod.category')}</Txt>
+          <ChoicePills
+            label={t('mod.category')}
+            value={category}
+            onChange={setCategory}
+            scroll={false}
+            options={MOD_CATEGORIES.map((c) => ({ value: c, label: d.mod.categories[c] }))}
+          />
         </View>
 
         <TextField
@@ -115,29 +106,26 @@ export default function ModScreen() {
           keyboardType="decimal-pad"
           inputMode="decimal"
           maxLength={16}
+          suffix={currency}
           error={touched ? errors.price : null}
         />
-        <Segmented
-          label={t('mod.currency')}
-          value={currency}
-          onChange={setCurrency}
-          options={CURRENCIES.map((c) => ({ value: c, label: c }))}
-        />
-        <SwitchRow label={t('mod.pricePublic')} hint={t('mod.pricePublicHint')} value={pricePublic} onValueChange={setPricePublic} />
+        <View style={{ gap: 6 }}>
+          <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20, textTransform: 'uppercase', letterSpacing: 0.2 }}>{t('mod.currency')}</Txt>
+          <SegmentedControl label={t('mod.currency')} value={currency} onChange={setCurrency} options={CURRENCIES.map((c) => ({ value: c, label: c }))} style={{ alignSelf: 'stretch' }} />
+        </View>
+        <Section footer={t('mod.pricePublicHint')}>
+          <SwitchCell title={t('mod.pricePublic')} value={pricePublic} onValueChange={setPricePublic} />
+        </Section>
 
         <FormError message={formError} />
-        <Button title={t('common.save')} onPress={submit} loading={busy} />
-        {existing ? <Button title={t('common.delete')} icon="trash" variant="danger" onPress={remove} /> : null}
-      </Screen>
+        <PillButton title={t('common.save')} onPress={submit} loading={busy} />
+        {existing ? (
+          <Section>
+            <Cell title={t('common.delete')} destructive center chevron={false} onPress={remove} />
+          </Section>
+        ) : null}
+      </NavScreen>
       )}
     </RequireAuth>
   );
 }
-
-const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  cat: { minHeight: 44, paddingHorizontal: 14, borderRadius: radius.md, justifyContent: 'center', borderWidth: 1 },
-  catOn: { backgroundColor: colors.accent, borderColor: colors.accent },
-  catOff: { backgroundColor: colors.surface, borderColor: colors.line },
-  catText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
-});

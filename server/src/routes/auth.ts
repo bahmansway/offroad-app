@@ -7,6 +7,8 @@ import { conflict, parse, unauthorized } from '../lib/errors.js';
 import { hashToken, newRefreshToken, REFRESH_TOKEN_TTL_MS } from '../lib/tokens.js';
 import type { Db } from '../db/index.js';
 import { makeLimiter } from '../lib/limits.js';
+import { privateUser } from '../lib/users.js';
+import { loadMe } from './profile.js';
 
 // OWASP-recommended argon2id settings (19 MiB, 2 iterations, 1 lane).
 const ARGON2_OPTS = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
@@ -28,13 +30,7 @@ const loginSchema = z
   .strict();
 const refreshSchema = z.object({ refreshToken: z.string().min(10).max(200) }).strict();
 
-type UserRow = typeof users.$inferSelect;
-export const privateUser = (u: UserRow) => ({
-  id: u.id,
-  email: u.email,
-  displayName: u.displayName,
-  createdAt: u.createdAt.toISOString(),
-});
+export { privateUser };
 
 // Used to keep login timing similar when the email does not exist.
 let dummyHash: Promise<string> | null = null;
@@ -73,7 +69,9 @@ export async function authRoutes(app: FastifyInstance) {
     if (inserted.length === 0) throw conflict('An account with this email already exists');
     const user = inserted[0];
     const rt = await issueRefreshToken(db, user.id);
-    return reply.status(201).send({ accessToken: signAccess(user.id), refreshToken: rt.token, user: privateUser(user) });
+    return reply
+      .status(201)
+      .send({ accessToken: signAccess(user.id), refreshToken: rt.token, user: { ...privateUser(user), currentCar: null } });
   });
 
   app.post('/auth/login', { preHandler: [loginPerIp, loginPerEmail] }, async (req) => {
@@ -87,7 +85,7 @@ export async function authRoutes(app: FastifyInstance) {
     const ok = await argon2.verify(user.passwordHash, body.password).catch(() => false);
     if (!ok) throw unauthorized('Wrong email or password');
     const rt = await issueRefreshToken(db, user.id);
-    return { accessToken: signAccess(user.id), refreshToken: rt.token, user: privateUser(user) };
+    return { accessToken: signAccess(user.id), refreshToken: rt.token, user: await loadMe(db, user.id) };
   });
 
   app.post('/auth/refresh', perIp(limits.refresh), async (req) => {
@@ -131,11 +129,5 @@ export async function authRoutes(app: FastifyInstance) {
       .set({ revokedAt: new Date() })
       .where(and(eq(refreshTokens.tokenHash, hashToken(refreshToken)), isNull(refreshTokens.revokedAt)));
     return reply.status(204).send();
-  });
-
-  app.get('/me', { preHandler: app.authenticate }, async (req) => {
-    const [user] = await db.select().from(users).where(eq(users.id, req.userId!)).limit(1);
-    if (!user) throw unauthorized();
-    return privateUser(user);
   });
 }

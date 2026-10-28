@@ -32,6 +32,8 @@ export interface RequestOptions {
   /** Send the access token if we have one (default true). */
   auth?: boolean;
   query?: Record<string, string | number | undefined | null>;
+  /** Raw bytes instead of JSON (photo uploads). */
+  binary?: { data: Uint8Array; contentType: string };
 }
 
 const KNOWN_CODES: ErrorCode[] = ['VALIDATION', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'RATE_LIMITED'];
@@ -189,12 +191,13 @@ export function createApiClient(opts: ApiClientOptions) {
     const url = path + buildQuery(o.query);
     const send = async (token?: string) => {
       const headers: Record<string, string> = { Accept: 'application/json' };
-      if (o.body !== undefined) headers['Content-Type'] = 'application/json';
+      if (o.binary) headers['Content-Type'] = o.binary.contentType;
+      else if (o.body !== undefined) headers['Content-Type'] = 'application/json';
       if (token) headers.Authorization = `Bearer ${token}`;
       return raw(url, {
         method: o.method ?? 'GET',
         headers,
-        body: o.body !== undefined ? JSON.stringify(o.body) : undefined,
+        body: o.binary ? (o.binary.data as unknown as BodyInit) : o.body !== undefined ? JSON.stringify(o.body) : undefined,
       });
     };
 

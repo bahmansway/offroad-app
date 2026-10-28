@@ -1,53 +1,101 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Screen, TopBar } from '../../components/Screen';
-import { CarRow } from '../../components/CarRow';
-import { Button, Card, ErrorState, Eyebrow, H1, H2, Loading, Muted } from '../../components/ui';
+import { CarCell, photoUri } from '../../components/Rows';
+import { Avatar, Card, Cell, EmptyState, ErrorState, LoadingState, NavScreen, PillButton, Section, Txt, useTheme } from '../../components/ui';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
 import { useAsync } from '../../lib/useAsync';
 import { errorMessage } from '../../lib/errors';
 import { formatDate, sameId } from '../../lib/format';
+import { HAIRLINE } from '../../lib/theme';
+import { getSendMessageHandler } from '../../lib/chatHooks';
 
 export default function UserScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useI18n();
+  const { c } = useTheme();
   const { user: me } = useAuth();
   const { data: u, error, loading, reload } = useAsync(() => api.user(id), [id]);
+  const [soon, setSoon] = useState(false);
 
-  if (loading) return <Loading />;
-  if (error || !u) return <Screen><TopBar /><ErrorState message={errorMessage(error, t)} onRetry={reload} /></Screen>;
+  if (loading) return <LoadingState />;
+  if (error || !u) return <NavScreen><ErrorState message={errorMessage(error, t)} onRetry={reload} /></NavScreen>;
 
   const isMe = sameId(me?.id, u.id);
+  const current = u.currentCar ?? null;
+  const others = u.cars.filter((car) => !sameId(car.id, current?.id));
+
+  function message() {
+    if (!me) return router.push('/login');
+    const h = getSendMessageHandler();
+    if (h) return h(u!);
+    setSoon(true);
+  }
+
   return (
-    <Screen>
-      <TopBar />
-      <H1>{u.displayName}</H1>
-      <Card style={{ flexDirection: 'row', gap: 24 }}>
-        <View style={{ gap: 2 }}>
-          <Eyebrow>{t('profile.memberSince')}</Eyebrow>
-          <Muted>{formatDate(u.createdAt)}</Muted>
-        </View>
-        <View style={{ gap: 2 }}>
-          <Eyebrow>{t('profile.spots')}</Eyebrow>
-          <Muted>{String(u.spotCount)}</Muted>
-        </View>
-      </Card>
-      <H2>{t('profile.cars')}</H2>
-      {u.cars.length === 0 ? <Muted>{t('profile.noCars')}</Muted> : null}
-      <View style={{ gap: 10 }}>
-        {u.cars.map((c) => <CarRow key={c.id} car={c} onPress={() => router.push(`/car/${c.id}`)} />)}
+    <NavScreen>
+      <View style={{ alignItems: 'center', gap: 8 }}>
+        <Avatar uri={photoUri(u.avatarUrl)} name={u.displayName} size={96} />
+        <Txt variant="title1" accessibilityRole="header" center>{u.displayName}</Txt>
+        {u.city || u.clan ? (
+          <Txt variant="subhead" tone="label2" center>{[u.city, u.clan ? `${u.clan.name} [${u.clan.tag}]` : null].filter(Boolean).join(' · ')}</Txt>
+        ) : null}
+        {u.bio ? <Txt variant="subhead" center style={{ maxWidth: 420 }}>{u.bio}</Txt> : null}
       </View>
+
       {!isMe ? (
-        <Button
-          title={t('profile.report')}
-          icon="flag"
-          variant="secondary"
-          onPress={() => router.push(me ? { pathname: '/report', params: { targetType: 'user', targetId: String(u.id) } } : '/login')}
-        />
+        <View style={{ gap: 6 }}>
+          <PillButton title={t('profile.sendMessage')} icon="message" onPress={message} />
+          {soon ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite">{t('profile.messageSoon')}</Txt> : null}
+        </View>
+      ) : (
+        <PillButton title={t('profile.edit')} variant="gray" icon="edit" onPress={() => router.push('/profile/edit')} />
+      )}
+
+      <Card padded={false} style={{ flexDirection: 'row', paddingVertical: 14 }}>
+        <Stat k={t('profile.memberSince')} v={formatDate(u.createdAt)} />
+        <View style={{ width: HAIRLINE, backgroundColor: c.separator }} />
+        <Stat k={t('profile.spots')} v={String(u.spotCount)} />
+        <View style={{ width: HAIRLINE, backgroundColor: c.separator }} />
+        <Stat k={t('profile.cars')} v={String(u.cars.length)} />
+      </Card>
+
+      {current ? (
+        <Section header={t('profile.currentCar')}>
+          <CarCell car={current} onPress={() => router.push(`/car/${current.id}`)} />
+        </Section>
       ) : null}
-    </Screen>
+
+      {others.length ? (
+        <Section header={t('profile.cars')}>
+          {others.map((car) => <CarCell key={car.id} car={car} onPress={() => router.push(`/car/${car.id}`)} />)}
+        </Section>
+      ) : !current ? (
+        <EmptyState icon="garage" title={t('profile.noCars')} style={{ paddingVertical: 12 }} />
+      ) : null}
+
+      {!isMe ? (
+        <Section>
+          <Cell
+            title={t('profile.report')}
+            destructive
+            center
+            chevron={false}
+            onPress={() => router.push(me ? { pathname: '/report', params: { targetType: 'user', targetId: String(u.id) } } : '/login')}
+          />
+        </Section>
+      ) : null}
+    </NavScreen>
+  );
+}
+
+function Stat({ k, v }: { k: string; v: string }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', gap: 2 }} accessible accessibilityLabel={`${k}: ${v}`}>
+      <Txt variant="caption" tone="label2" center numberOfLines={1}>{k}</Txt>
+      <Txt variant="headline" style={{ fontWeight: '700' }} numberOfLines={1}>{v}</Txt>
+    </View>
   );
 }

@@ -1,11 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import { cars, carRatings, mods, users, MOD_CATEGORIES, CURRENCIES } from '../db/schema.js';
-import { badRequest, forbidden, idParam, notFound, parse } from '../lib/errors.js';
+import { cars, carRatings, mods, users, MOD_CATEGORIES, CURRENCIES, DRIVES, TRANSMISSIONS, FUELS } from '../db/schema.js';
+import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
 import { ratingSchema, round1 } from '../lib/common.js';
 import type { Db } from '../db/index.js';
 import { makeLimiter } from '../lib/limits.js';
+import { deleteImage, imageUrl, MAX_UPLOAD_BYTES, storeImage } from '../lib/images.js';
+import { trimById } from './catalog.js';
+
+export const MAX_CARS_PER_USER = 20;
 
 const maxYear = () => new Date().getFullYear() + 1;
 const year = z
@@ -22,6 +26,22 @@ const optText = (max: number) =>
     .optional()
     .transform((v) => (v ? v : v === undefined ? undefined : null));
 
+// v2 spec fields: all optional, nullable (null clears). Values pre-filled from a trim stay editable.
+const specFields = {
+  trimId: z
+    .string()
+    .max(80)
+    .nullable()
+    .optional()
+    .refine((v) => v === undefined || v === null || trimById.has(v), { message: 'Unknown trim' }),
+  engineL: z.number().min(0.5).max(10).nullable().optional(),
+  hp: z.number().int().min(20).max(2000).nullable().optional(),
+  drive: z.enum(DRIVES).nullable().optional(),
+  transmission: z.enum(TRANSMISSIONS).nullable().optional(),
+  fuel: z.enum(FUELS).nullable().optional(),
+  color: optText(30),
+};
+
 const carCreate = z
   .object({
     make: z.string().trim().min(1).max(40),
@@ -29,6 +49,7 @@ const carCreate = z
     year,
     engine: optText(40),
     description: optText(1000),
+    ...specFields,
   })
   .strict();
 const carPatch = z
@@ -38,6 +59,7 @@ const carPatch = z
     year: year.optional(),
     engine: optText(40),
     description: optText(1000),
+    ...specFields,
   })
   .strict();
 
@@ -68,6 +90,18 @@ type ModRow = typeof mods.$inferSelect;
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
 
+/** Spec fields shared by CarSummary and Car. */
+export const carSpecs = (c: CarRow) => ({
+  trimId: c.trimId,
+  engineL: c.engineL,
+  hp: c.hp,
+  drive: c.drive,
+  transmission: c.transmission,
+  fuel: c.fuel,
+  color: c.color,
+  photoUrl: imageUrl(c.photoImageId),
+});
+
 export const toMod = (m: ModRow, viewerIsOwner: boolean) => ({
   id: m.id,
   name: m.name,
@@ -78,7 +112,7 @@ export const toMod = (m: ModRow, viewerIsOwner: boolean) => ({
 });
 
 /** Car summaries (list cards) for the given filter. */
-export async function loadCarSummaries(db: Db, where: { ownerId?: string }, limit = 50) {
+export async function loadCarSummaries(db: Db, where: { ownerId?: string; id?: string }, limit = 50) {
   const rows = await db
     .select({
       car: cars,
@@ -89,7 +123,9 @@ export async function loadCarSummaries(db: Db, where: { ownerId?: string }, limi
     })
     .from(cars)
     .innerJoin(users, eq(users.id, cars.ownerId))
-    .where(where.ownerId ? eq(cars.ownerId, where.ownerId) : undefined)
+    .where(
+      where.id ? eq(cars.id, where.id) : where.ownerId ? eq(cars.ownerId, where.ownerId) : undefined,
+    )
     .orderBy(desc(cars.createdAt))
     .limit(limit);
   return rows.map((r) => ({
@@ -98,6 +134,7 @@ export async function loadCarSummaries(db: Db, where: { ownerId?: string }, limi
     model: r.car.model,
     year: r.car.year,
     engine: r.car.engine,
+    ...carSpecs(r.car),
     owner: { id: r.car.ownerId, displayName: r.ownerName },
     ratingAvg: round1(r.ratingAvg),
     ratingCount: r.ratingCount,
@@ -112,6 +149,7 @@ export async function carRoutes(app: FastifyInstance) {
     makeLimiter(app, { max: app.config.rateLimits.create, timeWindow: '1 hour', key: (req) => `${kind}:${req.userId}` });
   const carCreateLimit = perUserHourly('car');
   const modCreateLimit = perUserHourly('mod');
+  const photoLimit = perUserHourly('photo');
 
   const ratingAgg = async (carId: string) => {
     const [agg] = await db
@@ -155,6 +193,7 @@ export async function carRoutes(app: FastifyInstance) {
       year: c.year,
       engine: c.engine,
       description: c.description,
+      ...carSpecs(c),
       owner: { id: c.ownerId, displayName: row.ownerName },
       mods: modRows.map((m) => toMod(m, isOwner)),
       ...(await ratingAgg(id)),
@@ -194,6 +233,8 @@ export async function carRoutes(app: FastifyInstance) {
 
   app.post('/cars', { preHandler: [app.authenticate, carCreateLimit] }, async (req, reply) => {
     const b = parse(carCreate, req.body);
+    const [owned] = await db.select({ n: sql<number>`count(*)::int` }).from(cars).where(eq(cars.ownerId, req.userId!));
+    if (owned.n >= MAX_CARS_PER_USER) throw conflict(`You can have at most ${MAX_CARS_PER_USER} cars`);
     const [c] = await db
       .insert(cars)
       .values({
@@ -203,6 +244,13 @@ export async function carRoutes(app: FastifyInstance) {
         year: b.year,
         engine: b.engine ?? null,
         description: b.description ?? null,
+        trimId: b.trimId ?? null,
+        engineL: b.engineL ?? null,
+        hp: b.hp ?? null,
+        drive: b.drive ?? null,
+        transmission: b.transmission ?? null,
+        fuel: b.fuel ?? null,
+        color: b.color ?? null,
       })
       .returning({ id: cars.id });
     return reply.status(201).send(await loadCar(c.id, req.userId));
@@ -219,8 +267,27 @@ export async function carRoutes(app: FastifyInstance) {
 
   app.delete('/cars/:id', { preHandler: app.authenticate }, async (req, reply) => {
     const id = idParam(req.params);
-    await loadOwnedCar(id, req.userId!);
+    const c = await loadOwnedCar(id, req.userId!);
     await db.delete(cars).where(eq(cars.id, id));
+    await deleteImage(db, c.photoImageId);
+    return reply.status(204).send();
+  });
+
+  // ---- car photo (raw image body, see lib/images.ts) ----
+  app.put('/cars/:id/photo', { bodyLimit: MAX_UPLOAD_BYTES, preHandler: [app.authenticate, photoLimit] }, async (req) => {
+    const id = idParam(req.params);
+    const c = await loadOwnedCar(id, req.userId!);
+    const imageId = await storeImage(db, req.userId!, 'car', req.body, c.photoImageId);
+    await db.update(cars).set({ photoImageId: imageId }).where(eq(cars.id, id));
+    await deleteImage(db, c.photoImageId);
+    return { photoUrl: imageUrl(imageId) };
+  });
+
+  app.delete('/cars/:id/photo', { preHandler: app.authenticate }, async (req, reply) => {
+    const id = idParam(req.params);
+    const c = await loadOwnedCar(id, req.userId!);
+    await db.update(cars).set({ photoImageId: null }).where(eq(cars.id, id));
+    await deleteImage(db, c.photoImageId);
     return reply.status(204).send();
   });
 

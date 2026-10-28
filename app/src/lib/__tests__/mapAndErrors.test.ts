@@ -30,7 +30,9 @@ describe('map messages from the WebView', () => {
       picked: null,
       pinLabel: () => '<b>x</b>',
     });
-    expect(pins[0].html).toContain('>3<');
+    expect(pins[0].html).toBe('3');
+    const odd = buildPins({ spots: [{ id: '2', type: 'trail', difficulty: '<img>' as never, lat: 40, lng: 49 } as never], picked: null, pinLabel: () => '' });
+    expect(odd[0].html).toBe('&lt;img&gt;');
   });
 });
 

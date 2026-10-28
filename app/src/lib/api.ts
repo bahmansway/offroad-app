@@ -2,9 +2,10 @@ import { createApiClient } from './apiClient';
 import { tokenStore, withLock } from './tokenStore';
 import { API_URL } from './config';
 import type {
-  AuthResponse, Car, CarInput, CarSummary, Id, Mod, ModInput, PublicUser, RatingResult,
-  ReportTarget, Spot, SpotInput, SpotType, User,
+  AuthResponse, Car, CarInput, CarSummary, CatalogBrand, CatalogModel, Id, MeInput, Mod, ModInput, PublicUser,
+  RatingResult, ReportTarget, Spot, SpotInput, SpotType, Trim, User,
 } from './types';
+import { toArray } from './catalog';
 
 let authLostHandler: (() => void) | null = null;
 export function onAuthLost(fn: (() => void) | null) {
@@ -30,6 +31,10 @@ export const api = {
   logout: (refreshToken: string) =>
     r<void>('/api/auth/logout', { method: 'POST', body: { refreshToken }, auth: false }),
   me: () => r<User>('/api/me'),
+  updateMe: (b: MeInput) => r<User>('/api/me', { method: 'PATCH', body: b }),
+  uploadAvatar: (data: Uint8Array, contentType = 'image/jpeg') =>
+    r<{ avatarUrl: string | null }>('/api/me/avatar', { method: 'PUT', binary: { data, contentType } }),
+  deleteAvatar: () => r<void>('/api/me/avatar', { method: 'DELETE' }),
 
   // spots
   spots: (q: { type?: SpotType; minLevel?: number; maxLevel?: number; q?: string } = {}) =>
@@ -52,6 +57,16 @@ export const api = {
   deleteMod: (id: Id) => r<void>(`/api/mods/${enc(id)}`, { method: 'DELETE' }),
   rateCar: (id: Id, stars: number) =>
     r<RatingResult>(`/api/cars/${enc(id)}/rating`, { method: 'PUT', body: { stars } }),
+  uploadCarPhoto: (id: Id, data: Uint8Array, contentType = 'image/jpeg') =>
+    r<{ photoUrl: string | null }>(`/api/cars/${enc(id)}/photo`, { method: 'PUT', binary: { data, contentType } }),
+  deleteCarPhoto: (id: Id) => r<void>(`/api/cars/${enc(id)}/photo`, { method: 'DELETE' }),
+
+  // car catalog (public). Accepts a bare array or {items} so either server shape works.
+  catalogBrands: async () => toArray<CatalogBrand>(await r<unknown>('/api/catalog/brands', { auth: false })),
+  catalogModels: async (brand: string) =>
+    toArray<CatalogModel>(await r<unknown>('/api/catalog/models', { query: { brand }, auth: false })),
+  catalogTrims: async (brand: string, model: string, year?: number) =>
+    toArray<Trim>(await r<unknown>('/api/catalog/trims', { query: { brand, model, year }, auth: false })),
 
   // other
   user: (id: Id) => r<PublicUser>(`/api/users/${enc(id)}`),

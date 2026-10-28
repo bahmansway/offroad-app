@@ -1,32 +1,48 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Hero } from '../../components/Hero';
-import { carTitle } from '../../components/CarRow';
-import { Body, Button, Card, ErrorState, FormError, H1, H2, IconButton, Loading, Muted, Stars } from '../../components/ui';
-import { Icon } from '../../components/Icon';
+import { carTitle, photoUri } from '../../components/Rows';
+import {
+  Card, Cell, ErrorState, FormError, GlassView, IconButton, LinkButton, LoadingState, Section,
+  SectionHeader, StarRating, Txt,
+} from '../../components/ui';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
+import { useTheme } from '../../lib/themeContext';
 import { useAsync, useRefocus } from '../../lib/useAsync';
 import { errorMessage } from '../../lib/errors';
 import { confirmAsync } from '../../lib/dialogs';
-import { formatRating, formatTotals, modPriceDisplay, sameId, sumVisiblePrices, tintFor } from '../../lib/format';
-import { colors, fonts, radius } from '../../lib/theme';
+import { formatNumber, formatTotals, modPriceDisplay, sameId, sumVisiblePrices } from '../../lib/format';
+import { pickPhoto } from '../../lib/photos';
+import { HAIRLINE } from '../../lib/theme';
 import type { Mod } from '../../lib/types';
+import { specTiles } from '../../lib/carSpecs';
 
 export default function CarScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, notice } = useLocalSearchParams<{ id: string; notice?: string }>();
   const { t, d, lang } = useI18n();
+  const { c } = useTheme();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { data: car, setData, error, loading, reload } = useAsync(() => api.car(id), [id, user?.id]);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(notice === 'photo' ? t('addCar.photoAfter') : null);
   const [rating, setRating] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useRefocus(reload);
 
-  if (loading && !car) return <Loading />;
-  if (error || !car) return <View style={{ flex: 1, backgroundColor: colors.bg }}><Hero tint={colors.surface} kind="car" height={120} fallback="/garage" /><ErrorState message={errorMessage(error, t)} onRetry={reload} /></View>;
+  if (loading && !car) return <LoadingState />;
+  if (error || !car) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.bg }}>
+        <Hero kind="car" height={140} fallback="/garage" />
+        <ErrorState message={errorMessage(error, t)} onRetry={reload} />
+      </View>
+    );
+  }
 
   const isOwner = sameId(user?.id, car.owner.id);
 
@@ -54,145 +70,146 @@ export default function CarScreen() {
     }
   }
 
+  async function changePhoto() {
+    setActionError(null);
+    const res = await pickPhoto('car');
+    if (!res.ok) {
+      if (res.reason !== 'cancelled') setActionError(t(res.reason === 'denied' ? 'profile.photoDenied' : res.reason === 'tooBig' ? 'profile.photoTooBig' : 'profile.photoFailed'));
+      return;
+    }
+    setUploading(true);
+    try {
+      const r = await api.uploadCarPhoto(car!.id, res.bytes);
+      setData({ ...car!, photoUrl: r.photoUrl });
+    } catch (e) {
+      setActionError(errorMessage(e, t, 'photo'));
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function openMod(mod?: Mod) {
     router.push({ pathname: '/car/mod', params: mod ? { carId: String(car!.id), modId: String(mod.id) } : { carId: String(car!.id) } });
   }
 
-  const meta = [String(car.year), car.engine].filter(Boolean).join(' · ');
+  const specs = specTiles(car, t, d);
+  const owner = car.owner.displayName;
   // The owner sees every price, so their "total" includes hidden ones too.
   const ownerTotal = isOwner ? formatTotals(sumVisiblePrices(car.mods), lang) : null;
+  const avg = car.ratingAvg != null ? formatNumber(Math.round(car.ratingAvg * 10) / 10, lang) : '–';
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={{ paddingBottom: 40 }}>
+    <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}>
       <Hero
-        tint={tintFor(car.id)}
         kind="car"
-        height={180}
+        height={170}
         fallback="/garage"
+        photoUri={photoUri(car.photoUrl)}
         right={isOwner ? (
-          <>
-            <IconButton icon="edit" label={t('garage.editCar')} onPress={() => router.push(`/car/edit/${car.id}`)} />
-            <IconButton icon="trash" label={t('common.delete')} onPress={removeCar} color={colors.danger} />
-          </>
+          <GlassView elevated style={{ height: 44, borderRadius: 22, flexDirection: 'row' }}>
+            <IconButton icon="camera" label={car.photoUrl ? t('addCar.changePhoto') : t('addCar.addPhoto')} onPress={changePhoto} style={{ backgroundColor: 'transparent', width: 48 }} />
+            <IconButton icon="edit" label={t('garage.editCar')} onPress={() => router.push(`/car/edit/${car.id}`)} style={{ backgroundColor: 'transparent', width: 48 }} />
+          </GlassView>
         ) : (
           <IconButton
             icon="flag"
+            glass
             label={t('spot.report')}
             onPress={() => router.push(user ? { pathname: '/report', params: { targetType: 'car', targetId: String(car.id) } } : '/login')}
           />
         )}
+        overlay={uploading ? <ActivityIndicator color="#FFFFFF" /> : null}
       />
-      <View style={styles.body}>
-        <View style={styles.titleRow}>
-          <View style={{ flex: 1, gap: 4 }}>
-            <H1 style={{ fontSize: 28 }}>{carTitle(car)}</H1>
-            <Muted>
-              {meta}
-              {' · '}
-              <Text accessibilityRole="link" onPress={() => router.push(`/user/${car.owner.id}`)} style={{ color: colors.accent }}>
-                {car.owner.displayName}
-              </Text>
-            </Muted>
+      <View style={{ padding: 16, gap: 14, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', gap: 8, paddingHorizontal: 4 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Txt variant="title1" accessibilityRole="header">{car.model}</Txt>
+            <Txt variant="subhead" tone="label2">
+              {car.make} · {car.year} ·{' '}
+              <Txt variant="subhead" tone="tint" accessibilityRole="link" onPress={() => router.push(`/user/${car.owner.id}`)}>{owner}</Txt>
+            </Txt>
           </View>
-          <View style={{ alignItems: 'flex-end', gap: 2 }} accessible accessibilityLabel={`★ ${formatRating(car.ratingAvg)}, ${t('garage.ratings', { count: car.ratingCount })}`}>
-            <Text style={styles.ratingBig}>{formatRating(car.ratingAvg)}</Text>
-            <Muted style={{ fontSize: 12 }}>{t('garage.ratings', { count: car.ratingCount })}</Muted>
+          <View style={{ alignItems: 'flex-end', gap: 2 }}>
+            <StarRating value={car.ratingAvg ?? 0} label={t('garage.votes', { avg, count: car.ratingCount })} />
+            <Txt variant="footnote" tone="label2">{car.ratingCount ? t('garage.votes', { avg, count: car.ratingCount }) : t('spot.notRated')}</Txt>
           </View>
         </View>
 
-        {car.description ? <Body style={{ lineHeight: 22 }}>{car.description}</Body> : null}
-
-        {isOwner ? (
-          <Muted style={{ fontSize: 13 }}>{t('garage.ownCarNoRate')}</Muted>
-        ) : (
-          <Card style={styles.rateRow}>
-            <Text style={styles.rateTitle}>{t('garage.rateTitle')}</Text>
-            <Stars value={car.myRating ?? 0} onChange={rate} disabled={rating} labelFor={(n) => t('spot.rateStar', { n, count: n })}
-            label={t('spot.starsLabel')} />
-          </Card>
-        )}
-        <FormError message={actionError} />
-
-        <View style={styles.modsHead}>
-          <H2>{t('garage.modifications')}</H2>
-          <Muted style={{ fontSize: 13 }}>{t('garage.modsCount', { count: car.mods.length })}</Muted>
-        </View>
-
-        <View style={styles.modsBox}>
-          {car.mods.length === 0 ? <Muted style={{ padding: 12 }}>{t('garage.noMods')}</Muted> : null}
-          {car.mods.map((m) => {
-            const p = modPriceDisplay(m, lang);
-            const priceText = p.kind === 'price' ? p.text : p.kind === 'private' ? t('garage.private') : t('garage.noPrice');
-            const content = (
-              <>
-                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                  <Text style={styles.modName}>{m.name}</Text>
-                  <Text style={styles.modCat}>{d.mod.categories[m.category as keyof typeof d.mod.categories] ?? m.category}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                  <Text style={[styles.price, p.kind !== 'price' && { color: colors.muted }]}>{priceText}</Text>
-                  {p.kind === 'price' && p.hiddenFromOthers ? (
-                    <View style={styles.hiddenRow}>
-                      <Icon name="eyeOff" size={12} color={colors.muted} />
-                      <Text style={styles.hiddenText}>{t('garage.hiddenFromOthers')}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                {isOwner ? <Icon name="chevron" size={16} color={colors.muted} /> : null}
-              </>
-            );
-            return isOwner ? (
-              <Pressable
-                key={m.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${t('mod.editMod', { name: m.name })}, ${priceText}`}
-                onPress={() => openMod(m)}
-                style={({ pressed }) => [styles.modRow, pressed && { backgroundColor: colors.surface2 }]}
+        {specs.length ? (
+          <Card padded={false} style={{ flexDirection: 'row', paddingVertical: 14, paddingHorizontal: 6 }}>
+            {specs.map((s, i) => (
+              <View
+                key={s.k}
+                style={{ flex: 1, alignItems: 'center', gap: 2, borderRightWidth: i === specs.length - 1 ? 0 : HAIRLINE, borderRightColor: c.separator, paddingHorizontal: 2 }}
+                accessible
+                accessibilityLabel={`${s.k}: ${s.v}`}
               >
-                {content}
-              </Pressable>
-            ) : (
-              <View key={m.id} style={styles.modRow} accessible accessibilityLabel={`${m.name}, ${priceText}`}>{content}</View>
-            );
-          })}
-          <View style={styles.totalRow}>
-            <View style={{ gap: 2, flexShrink: 1 }}>
-              <Text style={styles.totalLabel}>{t('garage.totalSpend')}</Text>
-              {car.hiddenPriceCount > 0 ? (
-                <Text style={styles.hiddenText}>{t('garage.hiddenCount', { count: car.hiddenPriceCount })}</Text>
-              ) : null}
+                <Txt variant="caption" tone="label2" numberOfLines={1}>{s.k}</Txt>
+                <Txt variant="headline" style={{ fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit>{s.v}</Txt>
+              </View>
+            ))}
+          </Card>
+        ) : isOwner ? (
+          <Card><Txt variant="subhead" tone="label2">{t('addCar.specsManual')}</Txt></Card>
+        ) : null}
+
+        {car.description ? <Card><Txt>{car.description}</Txt></Card> : null}
+
+        <View style={{ gap: 6 }}>
+          <SectionHeader
+            title={`${t('garage.modifications')} · ${car.mods.length}`}
+            right={isOwner ? <LinkButton title={t('garage.addModShort')} onPress={() => openMod()} /> : undefined}
+          />
+          <Card padded={false}>
+            {car.mods.length === 0 ? <Txt tone="label2" style={{ padding: 16 }}>{t('garage.noMods')}</Txt> : null}
+            {car.mods.map((m) => {
+              const p = modPriceDisplay(m, lang);
+              const priceText = p.kind === 'price' ? p.text : p.kind === 'private' ? t('garage.private') : t('garage.noPrice');
+              const cat = d.mod.categories[m.category as keyof typeof d.mod.categories] ?? m.category;
+              return (
+                <Cell
+                  key={m.id}
+                  title={m.name}
+                  subtitle={p.kind === 'price' && p.hiddenFromOthers ? `${cat} · ${t('garage.hiddenFromOthers')}` : cat}
+                  value={priceText}
+                  onPress={isOwner ? () => openMod(m) : undefined}
+                  chevron={isOwner}
+                  accessibilityLabel={isOwner ? `${t('mod.editMod', { name: m.name })}, ${priceText}` : `${m.name}, ${cat}, ${priceText}`}
+                  minHeight={52}
+                />
+              );
+            })}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 52, backgroundColor: c.tintSoft }}>
+              <View style={{ flexShrink: 1 }}>
+                <Txt variant="headline" color={c.tintSoftText}>{t('garage.totalShort')}</Txt>
+                {car.hiddenPriceCount > 0 ? <Txt variant="caption" color={c.tintSoftText}>{t('garage.hiddenCount', { count: car.hiddenPriceCount })}</Txt> : null}
+              </View>
+              <Txt variant="headline" color={c.tintSoftText} style={{ fontWeight: '700', flexShrink: 1, textAlign: 'right' }}>{formatTotals(car.totalPublicSpend, lang)}</Txt>
             </View>
-            <Text style={styles.totalValue}>{formatTotals(car.totalPublicSpend, lang)}</Text>
-          </View>
+          </Card>
           {isOwner && car.hiddenPriceCount > 0 && ownerTotal ? (
-            <View style={[styles.totalRow, { paddingTop: 0 }]}>
-              <Text style={styles.hiddenText}>{t('garage.totalAll')}</Text>
-              <Text style={[styles.price, { color: colors.muted }]}>{ownerTotal}</Text>
-            </View>
+            <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20 }}>{t('garage.totalAll')}: {ownerTotal}</Txt>
           ) : null}
         </View>
 
-        {isOwner ? <Button title={t('garage.addMod')} variant="dashed" onPress={() => openMod()} /> : null}
+        {isOwner ? (
+          <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20 }}>{t('garage.ownCarNoRate')}</Txt>
+        ) : (
+          <Section header={t('garage.rateTitle')}>
+            <View style={{ alignItems: 'center', paddingVertical: 4 }}>
+              <StarRating value={car.myRating ?? 0} onChange={rate} disabled={rating} size={30}
+                labelFor={(n) => t('spot.rateStar', { n, count: n })} label={t('spot.starsLabel')} />
+            </View>
+          </Section>
+        )}
+        <FormError message={actionError} />
+
+        {isOwner ? (
+          <Section>
+            <Cell title={t('garage.deleteCar')} destructive center onPress={removeCar} chevron={false} />
+          </Section>
+        ) : null}
       </View>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  body: { padding: 16, gap: 14, width: '100%', maxWidth: 640, alignSelf: 'center' },
-  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  ratingBig: { fontFamily: fonts.head, fontSize: 28, color: colors.accent },
-  rateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', paddingVertical: 8, paddingHorizontal: 12 },
-  rateTitle: { fontFamily: fonts.semibold, fontSize: 15, color: colors.text },
-  modsHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  modsBox: { borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, overflow: 'hidden' },
-  modRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 12, minHeight: 56, borderBottomWidth: 1, borderBottomColor: colors.surface2 },
-  modName: { fontFamily: fonts.semibold, fontSize: 15, color: colors.text },
-  modCat: { fontFamily: fonts.medium, fontSize: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 },
-  price: { fontFamily: fonts.semibold, fontSize: 15, color: colors.text },
-  hiddenRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  hiddenText: { fontFamily: fonts.medium, fontSize: 12, color: colors.muted },
-  totalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: 12, backgroundColor: colors.surface2 },
-  totalLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
-  totalValue: { fontFamily: fonts.head, fontSize: 22, color: colors.accent, flexShrink: 1, textAlign: 'right' },
-});

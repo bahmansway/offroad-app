@@ -1,9 +1,7 @@
 import React, { useCallback, useState } from 'react';
-import { View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { Screen } from '../../components/Screen';
-import { CarRow } from '../../components/CarRow';
-import { Body, Button, ErrorState, H1, H2, Muted } from '../../components/ui';
+import { CarCell } from '../../components/Rows';
+import { EmptyState, ErrorState, LargeTitleScreen, LoadingState, PillButton, Section } from '../../components/ui';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -17,6 +15,7 @@ export default function GarageScreen() {
   const [mine, setMine] = useState<CarSummary[] | null>(null);
   const [latest, setLatest] = useState<CarSummary[] | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -33,31 +32,38 @@ export default function GarageScreen() {
   }, [user]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  const add = () => router.push(user ? '/car/add' : '/login');
 
   return (
-    <Screen>
-      <H1>{t('garage.title')}</H1>
-
-      <H2>{t('garage.myCars')}</H2>
-      {offline && !user ? <Muted>{t('errors.offline')}</Muted> : user ? (
-        <View style={{ gap: 10 }}>
-          {mine?.length === 0 ? <Muted>{t('garage.noCars')}</Muted> : null}
-          {mine?.map((c) => <CarRow key={c.id} car={c} onPress={() => router.push(`/car/${c.id}`)} />)}
-          <Button title={t('garage.addCar')} icon="plus" onPress={() => router.push('/car/new')} />
-        </View>
+    <LargeTitleScreen
+      title={t('garage.title')}
+      right={<PillButton title={t('garage.addShort')} icon="plus" variant="tinted" size="small" onPress={add} accessibilityLabel={t('garage.addCar')} />}
+      onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }}
+      refreshing={refreshing}
+    >
+      {offline && !user ? <ErrorState message={t('errors.offline')} /> : user ? (
+        mine === null && !error ? <LoadingState inline /> : mine?.length === 0 ? (
+          <EmptyState icon="garage" title={t('garage.noCars')} actionLabel={t('garage.addCar')} onAction={add} />
+        ) : mine ? (
+          <Section header={t('garage.myCars')}>
+            {mine.map((c) => (
+              <CarCell key={c.id} car={c} onPress={() => router.push(`/car/${c.id}`)}
+                badge={sameId(user.currentCarId ?? user.currentCar?.id, c.id) ? t('garage.current') : undefined} />
+            ))}
+          </Section>
+        ) : null
       ) : (
-        <View style={{ gap: 10 }}>
-          <Body>{t('garage.loginPrompt')}</Body>
-          <Button title={t('common.login')} onPress={() => router.push('/login')} />
-        </View>
+        <EmptyState icon="garage" title={t('garage.loginPrompt')} actionLabel={t('common.login')} onAction={() => router.push('/login')} />
       )}
 
-      <H2 style={{ marginTop: 8 }}>{t('garage.community')}</H2>
       {error ? <ErrorState message={errorMessage(error, t)} onRetry={load} /> : null}
-      {latest?.length === 0 ? <Muted>{t('garage.noCommunity')}</Muted> : null}
-      <View style={{ gap: 10 }}>
-        {latest?.map((c) => <CarRow key={c.id} car={c} showOwner onPress={() => router.push(`/car/${c.id}`)} />)}
-      </View>
-    </Screen>
+      {latest && latest.length > 0 ? (
+        <Section header={t('garage.community')}>
+          {latest.map((c) => <CarCell key={c.id} car={c} showOwner onPress={() => router.push(`/car/${c.id}`)} />)}
+        </Section>
+      ) : latest?.length === 0 ? (
+        <Section header={t('garage.community')}><EmptyState icon="garage" title={t('garage.noCommunity')} /></Section>
+      ) : null}
+    </LargeTitleScreen>
   );
 }

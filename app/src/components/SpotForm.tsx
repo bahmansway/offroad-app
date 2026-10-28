@@ -1,14 +1,19 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SpotMap from './map/Map';
 import type { MapHandle } from './map/shared';
-import { Screen, TopBar } from './Screen';
-import { Button, FormError, Muted, Segmented, TextField, s as ui } from './ui';
-import { Icon } from './Icon';
+import { NavScreen, NavBar, goBack } from './ui/Screen';
+import { PillButton } from './ui/Button';
+import { DifficultyBar, SegmentedControl, TextField } from './ui/Controls';
+import { Cell, Section } from './ui/List';
+import { FormError } from './ui/States';
+import { Icon } from './ui/Icon';
+import { Txt } from './ui/Text';
 import { useI18n } from '../lib/i18n';
+import { useTheme } from '../lib/themeContext';
 import { errorMessage } from '../lib/errors';
 import { between, normalizeTag } from '../lib/validation';
-import { colors, fonts, levelColors, radius } from '../lib/theme';
 import type { Spot, SpotInput, SpotType } from '../lib/types';
 
 const NO_SPOTS: Spot[] = [];
@@ -21,6 +26,8 @@ export function SpotForm({ initial, title, submitLabel, onSubmit }: {
   onSubmit: (input: SpotInput) => Promise<void>;
 }) {
   const { t, d } = useI18n();
+  const { c } = useTheme();
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState<'pick' | 'form'>(initial ? 'form' : 'pick');
   const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(initial ? { lat: initial.lat, lng: initial.lng } : null);
   const [type, setType] = useState<SpotType>(initial?.type ?? 'trail');
@@ -88,11 +95,13 @@ export function SpotForm({ initial, title, submitLabel, onSubmit }: {
 
   if (step === 'pick') {
     return (
-      <Screen scroll={false} padded={false}>
-        <View style={styles.pickHead}>
-          <TopBar title={title} />
-          <Text style={ui.body}>{t('addSpot.pickTitle')}</Text>
-          <Muted style={{ fontSize: 13 }}>{t('addSpot.pickHint')}</Muted>
+      <View style={{ flex: 1, backgroundColor: c.bg }}>
+        <View style={{ paddingTop: insets.top }}>
+          <NavBar title={title} onBack={() => goBack('/')} />
+          <View style={{ paddingHorizontal: 20, paddingBottom: 12, gap: 4 }}>
+            <Txt variant="headline">{t('addSpot.pickTitle')}</Txt>
+            <Txt variant="footnote" tone="label2">{t('addSpot.pickHint')}</Txt>
+          </View>
         </View>
         <View style={{ flex: 1 }}>
           <SpotMap
@@ -106,38 +115,37 @@ export function SpotForm({ initial, title, submitLabel, onSubmit }: {
             failedText={t('map.loadFailed')}
           />
         </View>
-        <View style={styles.pickFoot}>
-          <Text style={ui.muted} accessibilityLiveRegion="polite">
+        <View style={{ padding: 16, paddingBottom: 16 + insets.bottom, gap: 10, backgroundColor: c.bg }}>
+          <Txt variant="footnote" tone="label2" accessibilityLiveRegion="polite" center>
             {picked ? t('addSpot.pinPlaced', { lat: picked.lat.toFixed(4), lng: picked.lng.toFixed(4) }) : ' '}
-          </Text>
+          </Txt>
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <Button title={t('addSpot.useCenter')} icon="pin" variant="secondary" style={{ flex: 1 }} onPress={useCenter} />
-            <Button title={t('addSpot.next')} disabled={!picked} style={{ flex: 1 }} onPress={() => setStep('form')} />
+            <PillButton title={t('addSpot.useCenter')} icon="pin" variant="gray" style={{ flex: 1 }} onPress={useCenter} />
+            <PillButton title={t('addSpot.next')} disabled={!picked} style={{ flex: 1 }} onPress={() => setStep('form')} />
           </View>
         </View>
-      </Screen>
+      </View>
     );
   }
 
   return (
-    <Screen>
-      <TopBar title={title} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t('addSpot.changeLocation')}
-        onPress={() => setStep('pick')}
-        style={styles.locRow}
-      >
-        <Icon name="pin" size={20} color={colors.accent} />
-        <Text style={[ui.body, { flex: 1 }]}>{picked ? `${picked.lat.toFixed(4)}, ${picked.lng.toFixed(4)}` : '—'}</Text>
-        <Text style={styles.linkText}>{t('addSpot.changeLocation')}</Text>
-      </Pressable>
+    <NavScreen title={title}>
+      <Section>
+        <Cell
+          title={picked ? `${picked.lat.toFixed(4)}, ${picked.lng.toFixed(4)}` : '—'}
+          left={<Icon name="pin" size={22} color={c.tint} />}
+          value={t('addSpot.changeLocation')}
+          onPress={() => setStep('pick')}
+          accessibilityLabel={t('addSpot.changeLocation')}
+        />
+      </Section>
 
-      <Segmented
+      <SegmentedControl
         label={t('addSpot.type')}
         value={type}
         onChange={setType}
         options={[{ value: 'trail', label: t('spot.trail') }, { value: 'camp', label: t('spot.camp') }]}
+        style={{ alignSelf: 'stretch' }}
       />
       <TextField label={t('addSpot.name')} placeholder={t('addSpot.namePlaceholder')} value={name} onChangeText={setName} maxLength={80} error={err('name')} />
       <TextField
@@ -151,39 +159,28 @@ export function SpotForm({ initial, title, submitLabel, onSubmit }: {
       />
 
       {type === 'trail' ? (
-        <View style={ui.field}>
-          <Text style={ui.label}>{t('addSpot.level')}</Text>
-          <View style={{ gap: 8 }} accessibilityRole="radiogroup" accessibilityLabel={t('addSpot.level')}>
-            {[1, 2, 3, 4, 5].map((n) => {
-              const on = level === n;
-              return (
-                <Pressable
-                  key={n}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: on }}
-                  accessibilityLabel={`${n} — ${d.levels.names[n - 1]}: ${d.levels.explain[n - 1]}`}
-                  onPress={() => setLevel(n)}
-                  style={[styles.levelOpt, on && { borderColor: levelColors[n - 1], backgroundColor: colors.surface2 }]}
-                >
-                  <View style={[styles.levelNum, { backgroundColor: levelColors[n - 1] }]}>
-                    <Text style={styles.levelNumText}>{n}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[ui.body, { fontFamily: fonts.semibold }]}>{d.levels.names[n - 1]}</Text>
-                    <Text style={ui.hint}>{d.levels.explain[n - 1]}</Text>
-                  </View>
-                  {on ? <Icon name="star" size={18} color={levelColors[n - 1]} fill={levelColors[n - 1]} /> : null}
-                </Pressable>
-              );
-            })}
-          </View>
-          {err('level') ? <Text style={ui.error} role="alert">{err('level')}</Text> : null}
+        <View style={{ gap: 6 }}>
+          <Section header={t('addSpot.level')}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <Cell
+                key={n}
+                title={`${n} · ${d.levels.names[n - 1]}`}
+                subtitle={d.levels.explain[n - 1]}
+                checked={level === n}
+                accessibilityRole="radio"
+                accessibilityLabel={`${n} — ${d.levels.names[n - 1]}: ${d.levels.explain[n - 1]}`}
+                onPress={() => setLevel(n)}
+              />
+            ))}
+          </Section>
+          {level ? <View style={{ paddingHorizontal: 20 }}><DifficultyBar level={level} label={t('spot.difficulty')} compact /></View> : null}
+          {err('level') ? <Txt variant="footnote" tone="destructive" style={{ paddingHorizontal: 20 }} role="alert">{err('level')}</Txt> : null}
         </View>
       ) : null}
 
       <TextField label={`${t('addSpot.season')} (${t('common.optional')})`} placeholder={t('addSpot.seasonPlaceholder')} value={season} onChangeText={setSeason} maxLength={40} error={err('season')} />
 
-      <View style={ui.field}>
+      <View style={{ gap: 10 }}>
         <TextField
           label={`${t('addSpot.tags')} (${t('common.optional')})`}
           hint={t('addSpot.tagsHint')}
@@ -194,43 +191,29 @@ export function SpotForm({ initial, title, submitLabel, onSubmit }: {
           maxLength={24}
           editable={tags.length < MAX_TAGS}
           right={
-            <Pressable accessibilityRole="button" accessibilityLabel={t('addSpot.addTag')} onPress={addTag} style={styles.tagAdd}>
-              <Icon name="plus" size={20} color={colors.accent} />
+            <Pressable accessibilityRole="button" accessibilityLabel={t('addSpot.addTag')} onPress={addTag} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 }}>
+              <Icon name="plus" size={22} color={c.tint} strokeWidth={2.6} />
             </Pressable>
           }
         />
-        <View style={styles.tags}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 4 }}>
           {tags.map((tag) => (
             <Pressable
               key={tag}
               accessibilityRole="button"
               accessibilityLabel={t('addSpot.removeTag', { tag })}
               onPress={() => setTags(tags.filter((x) => x !== tag))}
-              style={styles.tag}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14, borderRadius: 22, backgroundColor: c.tintSoft }}
             >
-              <Text style={styles.tagText}>{tag}</Text>
-              <Icon name="close" size={14} color={colors.muted} />
+              <Txt variant="subhead" color={c.tintSoftText}>{tag}</Txt>
+              <Icon name="close" size={14} color={c.tintSoftText} />
             </Pressable>
           ))}
         </View>
       </View>
 
       <FormError message={formError} />
-      <Button title={submitLabel} onPress={submit} loading={busy} />
-    </Screen>
+      <PillButton title={submitLabel} onPress={submit} loading={busy} />
+    </NavScreen>
   );
 }
-
-const styles = StyleSheet.create({
-  pickHead: { padding: 16, gap: 8 },
-  pickFoot: { padding: 16, gap: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderColor: colors.line },
-  locRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 12, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
-  linkText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.accent },
-  levelOpt: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, padding: 10, borderRadius: radius.md, borderWidth: 2, borderColor: colors.line, backgroundColor: colors.surface },
-  levelNum: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  levelNumText: { fontFamily: fonts.head, fontSize: 20, color: colors.onAccent },
-  tagAdd: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tag: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 12, borderRadius: 18, backgroundColor: colors.surface2 },
-  tagText: { fontFamily: fonts.medium, fontSize: 13, color: colors.text },
-});

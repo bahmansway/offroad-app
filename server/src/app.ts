@@ -16,11 +16,19 @@ import { authRoutes } from './routes/auth.js';
 import { spotRoutes } from './routes/spots.js';
 import { carRoutes } from './routes/cars.js';
 import { otherRoutes } from './routes/other.js';
+import { catalogRoutes } from './routes/catalog.js';
+import { profileRoutes } from './routes/profile.js';
+import { chatRoutes } from './routes/chat.js';
+import { clanRoutes } from './routes/clans.js';
+import { createRealtime, type Realtime } from './lib/realtime.js';
+import { UPLOAD_CONTENT_TYPES } from './lib/images.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
     db: Db;
     config: AppConfig;
+    /** Socket.IO (live chat) on the same HTTP server. */
+    realtime: Realtime;
     /** preHandler: requires a valid access token. */
     authenticate: (req: FastifyRequest) => Promise<void>;
   }
@@ -60,6 +68,7 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
   const { pool, db } = createDb(config.databaseUrl);
   app.decorate('db', db);
   app.decorate('config', config);
+  app.decorate('realtime', null as unknown as Realtime);
   app.addHook('onClose', async () => {
     await pool.end();
   });
@@ -101,6 +110,9 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
   await app.register(rateLimit, { global: false });
+  // Photo uploads: raw image bytes as the body. Type is sniffed from the bytes, the header is only a hint.
+  // The route sets its own bodyLimit (2 MB); everything else keeps the 256 KB default.
+  app.addContentTypeParser(UPLOAD_CONTENT_TYPES, { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
   await app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: '15m' } });
 
   // Optional auth on every request: invalid/expired tokens are only rejected on routes that require auth.
@@ -120,6 +132,12 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
     if (!req.userId) throw unauthorized();
   });
 
+  // ---- live chat (Socket.IO at /socket.io, same port; works behind Railway's proxy over WebSocket) ----
+  app.realtime = createRealtime(app);
+  app.addHook('onClose', async () => {
+    await app.realtime.io.close();
+  });
+
   // ---- API ----
   await app.register(
     async (api) => {
@@ -127,6 +145,10 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
       await api.register(spotRoutes);
       await api.register(carRoutes);
       await api.register(otherRoutes);
+      await api.register(catalogRoutes);
+      await api.register(profileRoutes);
+      await api.register(chatRoutes);
+      await api.register(clanRoutes);
       api.setNotFoundHandler((_req, reply) => {
         reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
       });

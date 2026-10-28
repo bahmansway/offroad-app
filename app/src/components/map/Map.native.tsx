@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, us
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 import {
-  BAKU_CENTER, DEFAULT_ZOOM, MAPLIBRE_CDN_VERSION, MAPLIBRE_SRI, MAP_STYLE_URL, PIN_CSS,
+  BAKU_CENTER, DEFAULT_ZOOM, MAPLIBRE_CDN_VERSION, MAPLIBRE_SRI, mapStyleUrl, pinCss,
   buildPins, isAllowedExternalLink, parseMapMessage, type MapProps,
 } from './shared';
-import { colors, fonts } from '../../lib/theme';
+import { palettes, type, type Scheme } from '../../lib/theme';
+import { useTheme } from '../../lib/themeContext';
 
 type WebViewHandle = { injectJavaScript: (js: string) => void };
 // The package's generic typings omit `ref`; the platform implementations do accept it.
@@ -14,20 +15,20 @@ const WebView = RNWebView as unknown as React.ComponentType<WebViewProps & { ref
 /** The page is loaded with this base URL so it has a stable, known origin. */
 const PAGE_ORIGIN = 'https://offroad-map.local';
 
-function buildHtml(center: [number, number], zoom: number): string {
+function buildHtml(center: [number, number], zoom: number, scheme: Scheme): string {
   const v = MAPLIBRE_CDN_VERSION;
+  const pal = palettes[scheme];
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link href="https://unpkg.com/maplibre-gl@${v}/dist/maplibre-gl.css" rel="stylesheet" integrity="${MAPLIBRE_SRI.css}" crossorigin="anonymous">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Barlow:wght@500&display=swap" rel="stylesheet">
-<style>html,body,#map{margin:0;height:100%;width:100%;background:${colors.mapBg}}${PIN_CSS}</style>
+<style>html,body,#map{margin:0;height:100%;width:100%;background:${pal.mapBg}}</style><style id="pins">${pinCss(scheme)}</style>
 </head><body><div id="map"></div>
 <script src="https://unpkg.com/maplibre-gl@${v}/dist/maplibre-gl.js" integrity="${MAPLIBRE_SRI.js}" crossorigin="anonymous"></script>
 <script>
 (function(){
   function send(m){ window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(m)); }
   if(!window.maplibregl){ send({type:'failed'}); return; }
-  var map = new maplibregl.Map({container:'map',style:${JSON.stringify(MAP_STYLE_URL)},center:${JSON.stringify(center)},zoom:${zoom},
+  var map = new maplibregl.Map({container:'map',style:${JSON.stringify(mapStyleUrl(scheme))},center:${JSON.stringify(center)},zoom:${zoom},
     attributionControl:{compact:true},dragRotate:false,pitchWithRotate:false});
   map.touchZoomRotate.disableRotation();
   var markers=[];
@@ -52,6 +53,8 @@ function buildHtml(center: [number, number], zoom: number): string {
   window.__jumpTo=function(lng,lat,z){
     var o={center:[Number(lng),Number(lat)]}; if(z!==null && isFinite(z)) o.zoom=Number(z); map.jumpTo(o);
   };
+  // Light/dark switch: new tile style + pin CSS. Both values come from our own constants.
+  window.__setScheme=function(styleUrl,css){ map.setStyle(styleUrl); var el=document.getElementById('pins'); if(el) el.textContent=css; };
   window.__getCenter=function(reqId){ var c=map.getCenter().wrap(); send({type:'center',lat:c.lat,lng:c.lng,reqId:reqId}); };
   send({type:'ready'});
 })();
@@ -68,6 +71,10 @@ export default function SpotMap(props: MapProps) {
   cb.current = props;
   const centerReqs = useRef(new Map<number, (c: { lat: number; lng: number } | null) => void>());
   const nextReq = useRef(1);
+  const { scheme: themeScheme } = useTheme();
+  const scheme = props.scheme ?? themeScheme;
+  const pal = palettes[scheme];
+  const shownScheme = useRef(scheme);
 
   useImperativeHandle(props.ref, () => ({
     getCenter: () =>
@@ -84,7 +91,7 @@ export default function SpotMap(props: MapProps) {
 
   // HTML is built once; later changes are pushed with injectJavaScript.
   const html = useMemo(
-    () => buildHtml(props.center ? [props.center.lng, props.center.lat] : BAKU_CENTER, props.zoom ?? DEFAULT_ZOOM),
+    () => buildHtml(props.center ? [props.center.lng, props.center.lat] : BAKU_CENTER, props.zoom ?? DEFAULT_ZOOM, scheme),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -95,6 +102,13 @@ export default function SpotMap(props: MapProps) {
     // JSON.stringify output is a valid JS literal; labels/ids are escaped inside it.
     if (ready) web.current?.injectJavaScript(`window.__setPins(${JSON.stringify(pins)});true;`);
   }, [ready, pins]);
+
+  useEffect(() => {
+    if (ready && shownScheme.current !== scheme) {
+      shownScheme.current = scheme;
+      web.current?.injectJavaScript(`window.__setScheme(${JSON.stringify(mapStyleUrl(scheme))},${JSON.stringify(pinCss(scheme))});true;`);
+    }
+  }, [ready, scheme]);
 
   useEffect(() => {
     if (ready && props.center) {
@@ -126,7 +140,7 @@ export default function SpotMap(props: MapProps) {
   }, []);
 
   return (
-    <View style={styles.wrap} accessibilityLabel={props.label}>
+    <View style={[styles.wrap, { backgroundColor: pal.mapBg }]} accessibilityLabel={props.label}>
       <WebView
         ref={web}
         source={{ html, baseUrl: PAGE_ORIGIN + '/' }}
@@ -143,7 +157,7 @@ export default function SpotMap(props: MapProps) {
         setSupportMultipleWindows={false}
         allowFileAccess={false}
         allowsLinkPreview={false}
-        style={styles.web}
+        style={[styles.web, { backgroundColor: pal.mapBg }]}
         // Top-level navigation never leaves our page; attribution links go through Linking above.
         onShouldStartLoadWithRequest={(req) => {
           if (req.url.startsWith(PAGE_ORIGIN) || req.url === 'about:blank') return true;
@@ -153,7 +167,7 @@ export default function SpotMap(props: MapProps) {
       />
       {failed && props.failedText ? (
         <View style={styles.failed} pointerEvents="none">
-          <Text style={styles.failedText}>{props.failedText}</Text>
+          <Text style={[styles.failedText, { color: pal.label }]}>{props.failedText}</Text>
         </View>
       ) : null}
     </View>
@@ -161,8 +175,8 @@ export default function SpotMap(props: MapProps) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.mapBg, overflow: 'hidden' },
-  web: { flex: 1, backgroundColor: colors.mapBg },
+  wrap: { flex: 1, overflow: 'hidden' },
+  web: { flex: 1 },
   failed: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  failedText: { color: colors.text, fontFamily: fonts.medium, fontSize: 14, textAlign: 'center' },
+  failedText: { ...type.subhead, textAlign: 'center' },
 });

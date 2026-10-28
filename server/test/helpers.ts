@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
+import sharp from 'sharp';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 
@@ -47,3 +48,11 @@ export async function register(app: FastifyInstance, name = 'Tester') {
     auth: { authorization: string };
   };
 }
+
+/** Random-noise PNG: compresses badly, so it's well over 256 KB but under 2 MB. */
+export async function noisePng(w = 400, h = 400) {
+  const raw = Buffer.alloc(w * h * 3);
+  for (let i = 0; i < raw.length; i++) raw[i] = (Math.random() * 256) | 0;
+  return sharp(raw, { raw: { width: w, height: h, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
+}
+

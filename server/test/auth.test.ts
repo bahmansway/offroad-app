@@ -27,7 +27,7 @@ describe('auth', () => {
     const b = reg.json();
     expect(b.accessToken).toBeTypeOf('string');
     expect(b.refreshToken).toBeTypeOf('string');
-    expect(Object.keys(b.user).sort()).toEqual(['createdAt', 'displayName', 'email', 'id']);
+    expect(Object.keys(b.user).sort()).toEqual(['avatarUrl', 'bio', 'city', 'createdAt', 'currentCar', 'currentCarId', 'displayName', 'email', 'id']);
     expect(b.user.email).toBe('driver@example.com');
     expect(JSON.stringify(b)).not.toContain('password');
 
@@ -216,7 +216,7 @@ describe('rate limit', () => {
 
   it('default limits: login 10, register 20, refresh 60, create 30', () => {
     const c = loadConfig({ DATABASE_URL: 'postgres://x', JWT_SECRET: 'y'.repeat(40) });
-    expect(c.rateLimits).toEqual({ login: 10, loginPerIp: 100, register: 20, refresh: 60, create: 30 });
+    expect(c.rateLimits).toEqual({ login: 10, loginPerIp: 100, register: 20, refresh: 60, create: 30, messages: 30 });
   });
 });
 

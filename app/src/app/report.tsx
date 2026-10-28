@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { Screen, TopBar, goBack } from '../components/Screen';
-import { Body, Button, FormError, TextField } from '../components/ui';
+import { EmptyState, FormError, PillButton, SheetScreen, TextField, goBack } from '../components/ui';
 import { RequireAuth } from '../components/RequireAuth';
 import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { errorMessage } from '../lib/errors';
 import type { ReportTarget } from '../lib/types';
 
-const TARGETS: ReportTarget[] = ['spot', 'car', 'user'];
+const TARGETS: ReportTarget[] = ['spot', 'car', 'user', 'message', 'clan'];
 
 export default function ReportScreen() {
   const { targetType, targetId } = useLocalSearchParams<{ targetType: string; targetId: string }>();
@@ -39,13 +38,9 @@ export default function ReportScreen() {
 
   return (
     <RequireAuth>
-      <Screen>
-        <TopBar title={t('report.title')} />
-        {!valid ? <Body>{t('common.notFound')}</Body> : done ? (
-          <>
-            <Body>{t('report.sent')}</Body>
-            <Button title={t('common.close')} onPress={() => goBack('/')} />
-          </>
+      <SheetScreen title={t('report.title')} cancelLabel={t('common.cancel')} onBack={() => goBack('/')} contentStyle={{ paddingHorizontal: 16 }}>
+        {!valid ? <EmptyState icon="info" title={t('common.notFound')} /> : done ? (
+          <EmptyState icon="check" title={t('report.sent')} actionLabel={t('common.close')} onAction={() => goBack('/')} />
         ) : (
           <>
             <TextField
@@ -57,10 +52,10 @@ export default function ReportScreen() {
               maxLength={500}
             />
             <FormError message={error} />
-            <Button title={t('report.send')} onPress={send} loading={busy} />
+            <PillButton title={t('report.send')} onPress={send} loading={busy} />
           </>
         )}
-      </Screen>
+      </SheetScreen>
     </RequireAuth>
   );
 }

@@ -17,6 +17,10 @@ interface AuthValue {
   logout: () => Promise<void>;
   /** set when a saved session expired; cleared on next login */
   sessionLost: boolean;
+  /** merge fields into the current user after a profile change (PATCH /me, avatar upload) */
+  updateUser: (patch: Partial<User>) => void;
+  /** reload /me (e.g. after deleting the current car) */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -128,9 +132,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const updateUser = useCallback((patch: Partial<User>) => {
+    setUser((u) => (u ? { ...u, ...patch } : u));
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const me = await api.me();
+      if (alive.current) setUser(me);
+    } catch {
+      /* keep what we have; check() handles offline/expired */
+    }
+  }, []);
+
   const value = useMemo(
-    () => ({ user, loading, offline, retry: check, login, register, logout, sessionLost }),
-    [user, loading, offline, check, login, register, logout, sessionLost],
+    () => ({ user, loading, offline, retry: check, login, register, logout, sessionLost, updateUser, refreshUser }),
+    [user, loading, offline, check, login, register, logout, sessionLost, updateUser, refreshUser],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -1,20 +1,26 @@
 import React, { useState } from 'react';
-import { Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Hero } from '../../components/Hero';
-import { Body, Button, Card, ErrorState, Eyebrow, FormError, H1, IconButton, LevelPips, Loading, Muted, Stars, Tag } from '../../components/ui';
+import {
+  Card, Cell, DifficultyBar, ErrorState, FormError, GlassView, IconButton, IconTile, LoadingState, PillButton,
+  Section, StarRating, Txt,
+} from '../../components/ui';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
+import { useTheme } from '../../lib/themeContext';
 import { useAsync, useRefocus } from '../../lib/useAsync';
 import { errorMessage } from '../../lib/errors';
 import { confirmAsync } from '../../lib/dialogs';
-import { distanceFromBaku, formatDistance, formatRating, levelColor, sameId, tintFor } from '../../lib/format';
-import { colors, fonts } from '../../lib/theme';
+import { distanceFromBaku, formatDistance, formatNumber, formatRating, sameId } from '../../lib/format';
 
 export default function SpotScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t, d, lang } = useI18n();
+  const { c } = useTheme();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { data: spot, setData, error, loading, reload } = useAsync(() => api.spot(id), [id, user?.id]);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -23,8 +29,15 @@ export default function SpotScreen() {
   // refresh after coming back from the edit screen
   useRefocus(reload);
 
-  if (loading && !spot) return <Loading />;
-  if (error || !spot) return <View style={{ flex: 1, backgroundColor: colors.bg }}><Hero tint={colors.surface} kind="hills" height={120} fallback="/" /><ErrorState message={errorMessage(error, t)} onRetry={reload} /></View>;
+  if (loading && !spot) return <LoadingState />;
+  if (error || !spot) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.bg }}>
+        <Hero kind="hills" height={140} fallback="/" />
+        <ErrorState message={errorMessage(error, t)} onRetry={reload} />
+      </View>
+    );
+  }
 
   const isOwner = sameId(user?.id, spot.owner.id);
   const km = distanceFromBaku(spot);
@@ -63,110 +76,87 @@ export default function SpotScreen() {
     Linking.openURL(url);
   }
 
-  const ratedText = spot.ratingCount > 0
-    ? t('spot.ratedBy', { avg: formatRating(spot.ratingAvg), count: spot.ratingCount })
-    : t('spot.notRated');
+  const level = spot.type === 'trail' && spot.difficulty ? spot.difficulty : null;
+  const avg = spot.ratingAvg != null ? formatNumber(Math.round(spot.ratingAvg * 10) / 10, lang) : formatRating(null);
+  const ratedText = spot.ratingCount > 0 ? t('spot.ratingValue', { avg, count: spot.ratingCount }) : t('spot.notRated');
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={{ paddingBottom: 40 }}>
-      <Hero
-        tint={tintFor(spot.id)}
-        kind="hills"
-        height={200}
-        fallback="/"
-        right={isOwner ? (
-          <>
-            <IconButton icon="edit" label={t('common.edit')} onPress={() => router.push(`/spot/edit/${spot.id}`)} />
-            <IconButton icon="trash" label={t('common.delete')} onPress={remove} color={colors.danger} />
-          </>
-        ) : null}
-      />
-      <View style={styles.body}>
-        <View style={{ gap: 6 }}>
-          <H1>{spot.name}</H1>
-          <Muted>
-            {spot.type === 'trail' ? t('spot.trail') : t('spot.camp')}
-            {' · '}
-            <Text
-              accessibilityRole="link"
-              onPress={() => router.push(`/user/${spot.owner.id}`)}
-              style={{ color: colors.accent }}
-            >
-              {t('spot.sharedBy', { name: spot.owner.displayName })}
-            </Text>
-            {' · '}
-            {t('spot.fromBaku', { km: formatDistance(km, lang) })}
-          </Muted>
-        </View>
-
-        <View style={styles.cards}>
-          <Card style={{ flex: 1, gap: 6, padding: 12 }}>
-            <Eyebrow>{t('spot.difficulty')}</Eyebrow>
-            {spot.type === 'trail' && spot.difficulty ? (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={[styles.bigNum, { color: levelColor(spot.difficulty) }]}>{spot.difficulty}</Text>
-                  <LevelPips level={spot.difficulty} size="lg" />
-                </View>
-                <Body style={{ fontSize: 13 }}>
-                  {d.levels.names[spot.difficulty - 1]} · {d.levels.explain[spot.difficulty - 1]}
-                </Body>
-              </>
-            ) : (
-              <Body style={{ fontSize: 13 }}>{t('spot.noDifficulty')}</Body>
-            )}
-          </Card>
-          <Card style={{ flex: 1, gap: 6, padding: 12 }}>
-            <Eyebrow>{t('spot.bestSeason')}</Eyebrow>
-            <Text style={styles.season}>{spot.season || t('spot.anySeason')}</Text>
-          </Card>
-        </View>
-
-        <View style={styles.tags}>
-          {spot.tags.map((tag) => <Tag key={tag} label={tag} />)}
-          <Tag label={ratedText} />
-        </View>
-
-        <View style={{ gap: 6 }}>
-          <Eyebrow>{t('spot.description')}</Eyebrow>
-          <Body style={{ lineHeight: 22 }}>{spot.description || t('spot.noDescription')}</Body>
-        </View>
-
-        <Card style={styles.rateRow}>
-          <Text style={styles.rateTitle}>{t('spot.rateTitle')}</Text>
-          <Stars
-            value={spot.myRating ?? 0}
-            onChange={rate}
-            disabled={rating}
-            labelFor={(n) => t('spot.rateStar', { n, count: n })}
-            label={t('spot.starsLabel')}
-          />
-        </Card>
-        <FormError message={actionError} />
-
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Button title={t('spot.navigate')} icon="pin" variant="secondary" style={{ flex: 1 }} onPress={navigate} />
-          {!isOwner ? (
-            <Button
-              title={t('spot.report')}
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom }}>
+        <Hero
+          kind="hills"
+          height={250}
+          fallback="/"
+          right={isOwner ? (
+            <GlassView elevated style={{ height: 44, borderRadius: 22, flexDirection: 'row' }}>
+              <IconButton icon="edit" label={t('common.edit')} onPress={() => router.push(`/spot/edit/${spot.id}`)} style={{ backgroundColor: 'transparent', width: 48 }} />
+              <IconButton icon="trash" label={t('common.delete')} onPress={remove} color={c.destructive} style={{ backgroundColor: 'transparent', width: 48 }} />
+            </GlassView>
+          ) : (
+            <IconButton
               icon="flag"
-              variant="secondary"
-              style={{ flex: 1 }}
+              glass
+              label={t('spot.report')}
               onPress={() => router.push(user ? { pathname: '/report', params: { targetType: 'spot', targetId: String(spot.id) } } : '/login')}
             />
-          ) : null}
+          )}
+        />
+        <View style={{ padding: 16, paddingTop: 20, gap: 20, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
+          <View style={{ gap: 4, paddingHorizontal: 4 }}>
+            <Txt variant="largeTitle" accessibilityRole="header">{spot.name}</Txt>
+            <Txt variant="subhead" tone="label2">
+              {spot.type === 'trail' ? t('spot.trail') : t('spot.camp')}
+              {' · '}
+              <Txt variant="subhead" tone="tint" accessibilityRole="link" onPress={() => router.push(`/user/${spot.owner.id}`)}>
+                {t('spot.sharedBy', { name: spot.owner.displayName })}
+              </Txt>
+              {' · '}
+              {t('spot.fromBaku', { km: formatDistance(km, lang) })}
+            </Txt>
+          </View>
+
+          <Card>
+            {level ? (
+              <DifficultyBar level={level} word={d.levels.names[level - 1]} label={t('spot.difficulty')} caption={d.levels.explain[level - 1]} />
+            ) : (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Txt variant="subhead" tone="label2">{t('spot.difficulty')}</Txt>
+                <Txt variant="headline">{t('spot.noDifficulty')}</Txt>
+              </View>
+            )}
+          </Card>
+
+          <Section>
+            <Cell title={t('spot.season')} value={spot.season || t('spot.anySeason')} left={<IconTile icon="season" />} minHeight={48} />
+            {spot.tags.length ? <Cell title={t('spot.tagsLabel')} value={spot.tags.join(', ')} left={<IconTile icon="tag" />} minHeight={48} /> : null}
+            <Cell title={t('spot.rating')} value={ratedText} left={<IconTile icon="star" />} minHeight={48} />
+          </Section>
+
+          <Section header={t('spot.description')}>
+            <View style={{ padding: 16 }}>
+              <Txt>{spot.description || t('spot.noDescription')}</Txt>
+            </View>
+          </Section>
+
+          <Section header={t('spot.rateTitle')}>
+            <View style={{ paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center' }}>
+              <StarRating
+                value={spot.myRating ?? 0}
+                onChange={rate}
+                disabled={rating}
+                size={30}
+                labelFor={(n) => t('spot.rateStar', { n, count: n })}
+                label={t('spot.starsLabel')}
+              />
+            </View>
+          </Section>
+          <FormError message={actionError} />
         </View>
+      </ScrollView>
+
+      <View style={{ position: 'absolute', left: 16, right: 16, bottom: 24 + insets.bottom, flexDirection: 'row', gap: 10, maxWidth: 608, alignSelf: 'center' }}>
+        <PillButton title={t('spot.navigate')} icon="navigate" onPress={navigate} style={{ flex: 1 }} />
       </View>
-    </ScrollView>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  body: { padding: 16, gap: 14, width: '100%', maxWidth: 640, alignSelf: 'center' },
-  cards: { flexDirection: 'row', gap: 10 },
-  bigNum: { fontFamily: fonts.head, fontSize: 28 },
-  season: { fontFamily: fonts.head, fontSize: 22, color: colors.text },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  rateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', paddingVertical: 8, paddingHorizontal: 12 },
-  rateTitle: { fontFamily: fonts.semibold, fontSize: 15, color: colors.text },
-});

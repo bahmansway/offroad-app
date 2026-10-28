@@ -1,4 +1,4 @@
-import { levelColors, colors, tints } from './theme';
+import { tints } from './theme';
 
 export type Lang = 'az' | 'en';
 export type Currency = 'AZN' | 'USD' | 'EUR';
@@ -10,17 +10,6 @@ export const BAKU = { lat: 40.4093, lng: 49.8671 } as const;
 
 export function isValidLevel(n: unknown): n is number {
   return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 5;
-}
-
-/** Colour for a difficulty level (1–5). Falls back to the muted colour. */
-export function levelColor(level: number | null | undefined): string {
-  return isValidLevel(level) ? levelColors[level - 1] : colors.muted;
-}
-
-/** Five pip colours: filled up to `level` in the level colour, rest in the line colour. */
-export function levelPips(level: number | null | undefined): string[] {
-  const c = levelColor(level);
-  return [1, 2, 3, 4, 5].map((i) => (isValidLevel(level) && i <= level ? c : colors.line));
 }
 
 /** Formats a number with locale-appropriate separators.
@@ -131,6 +120,14 @@ export function tintFor(id: string | number): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return tints[h % tints.length];
+}
+
+/** "Kamran Məmmədov" → "KM", "kamran_4x4" → "KA". */
+export function initials(name: string | null | undefined): string {
+  const words = (name ?? '').trim().split(/[\s_.-]+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return Array.from(words[0]).slice(0, 2).join('').toLocaleUpperCase();
+  return (Array.from(words[0])[0] + Array.from(words[1])[0]).toLocaleUpperCase();
 }
 
 export function sameId(a: string | number | null | undefined, b: string | number | null | undefined): boolean {

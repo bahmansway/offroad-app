@@ -2,16 +2,19 @@ import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { BAKU_CENTER, DEFAULT_ZOOM, MAP_STYLE_URL, PIN_CSS, buildPins, type MapProps } from './shared';
-import { colors, fonts } from '../../lib/theme';
+import { BAKU_CENTER, DEFAULT_ZOOM, buildPins, mapStyleUrl, pinCss, type MapProps } from './shared';
+import { palettes, type } from '../../lib/theme';
+import { useTheme } from '../../lib/themeContext';
 
-let cssInjected = false;
-function injectCss() {
-  if (cssInjected || typeof document === 'undefined') return;
-  const el = document.createElement('style');
-  el.textContent = PIN_CSS;
-  document.head.appendChild(el);
-  cssInjected = true;
+function injectCss(scheme: 'light' | 'dark') {
+  if (typeof document === 'undefined') return;
+  let el = document.getElementById('or-pin-css') as HTMLStyleElement | null;
+  if (!el) {
+    el = document.createElement('style');
+    el.id = 'or-pin-css';
+    document.head.appendChild(el);
+  }
+  el.textContent = pinCss(scheme);
 }
 
 export default function SpotMap(props: MapProps) {
@@ -21,6 +24,10 @@ export default function SpotMap(props: MapProps) {
   const cb = useRef(props);
   cb.current = props;
   const [failed, setFailed] = useState(false);
+  const { scheme: themeScheme } = useTheme();
+  const scheme = props.scheme ?? themeScheme;
+  const pal = palettes[scheme];
+  const styleShown = useRef(scheme);
 
   useImperativeHandle(props.ref, () => ({
     getCenter: async () => {
@@ -30,12 +37,12 @@ export default function SpotMap(props: MapProps) {
   }), []);
 
   useEffect(() => {
-    injectCss();
+    injectCss(scheme);
     const container = holder.current;
     if (!container) return;
     const map = new maplibregl.Map({
       container,
-      style: MAP_STYLE_URL,
+      style: mapStyleUrl(scheme),
       center: props.center ? [props.center.lng, props.center.lat] : BAKU_CENTER,
       zoom: props.zoom ?? DEFAULT_ZOOM,
       attributionControl: { compact: true },
@@ -43,7 +50,8 @@ export default function SpotMap(props: MapProps) {
       pitchWithRotate: false,
     });
     map.touchZoomRotate.disableRotation();
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    // Zoom buttons only on wide screens; on phones they would sit under the floating search bar.
+    if (container.clientWidth >= 700) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-left');
     map.on('click', (e) => {
       const p = e.lngLat.wrap();
       cb.current.onMapPress?.(p.lat, p.lng);
@@ -70,6 +78,15 @@ export default function SpotMap(props: MapProps) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Light/dark switch: swap the tile style and pin colours without rebuilding the map.
+  useEffect(() => {
+    injectCss(scheme);
+    if (mapRef.current && styleShown.current !== scheme) {
+      styleShown.current = scheme;
+      mapRef.current.setStyle(mapStyleUrl(scheme));
+    }
+  }, [scheme]);
 
   // Recentre when asked (e.g. spot detail)
   useEffect(() => {
@@ -103,11 +120,11 @@ export default function SpotMap(props: MapProps) {
   }, [props.spots, props.picked?.lat, props.picked?.lng, props.pinLabel]);
 
   return (
-    <View style={styles.wrap} accessibilityRole="none" aria-label={props.label} role="region">
+    <View style={[styles.wrap, { backgroundColor: pal.mapBg }]} accessibilityRole="none" aria-label={props.label} role="region">
       <div ref={holder} style={{ position: 'absolute', inset: 0 }} />
       {failed && props.failedText ? (
         <View style={styles.failed} pointerEvents="none">
-          <Text style={styles.failedText}>{props.failedText}</Text>
+          <Text style={[styles.failedText, { color: pal.label }]}>{props.failedText}</Text>
         </View>
       ) : null}
     </View>
@@ -115,7 +132,7 @@ export default function SpotMap(props: MapProps) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.mapBg, overflow: 'hidden' },
+  wrap: { flex: 1, overflow: 'hidden' },
   failed: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  failedText: { color: colors.text, fontFamily: fonts.medium, fontSize: 14, textAlign: 'center' },
+  failedText: { ...type.subhead, textAlign: 'center' },
 });

@@ -1,6 +1,6 @@
 import {
-  BAKU, distanceKm, formatDistance, formatNumber, formatPrice, formatTotals, isValidLevel, isValidPrice,
-  levelColor, levelPips, modPriceDisplay, parsePriceInput, sumVisiblePrices,
+  BAKU, distanceKm, formatDistance, formatNumber, formatPrice, formatTotals, initials, isValidLevel, isValidPrice,
+  modPriceDisplay, parsePriceInput, sumVisiblePrices,
 } from '../format';
 import { filterSpots, sortByDistance } from '../spotFilters';
 import { translate } from '../i18n';
@@ -9,18 +9,21 @@ import az from '../../locales/az';
 import type { Spot } from '../types';
 
 describe('difficulty helpers', () => {
-  it('maps levels 1–5 to the spec colours', () => {
-    expect([1, 2, 3, 4, 5].map(levelColor)).toEqual(['#9FD49A', '#E8D36A', '#FF8A2A', '#F0574A', '#C9A0FF']);
-  });
-  it('falls back for missing / bad levels', () => {
-    expect(levelColor(null)).toBe('#ABA493');
-    expect(levelColor(0)).toBe('#ABA493');
-    expect(levelColor(2.5)).toBe('#ABA493');
+  it('validates levels', () => {
+    expect(isValidLevel(1)).toBe(true);
+    expect(isValidLevel(5)).toBe(true);
+    expect(isValidLevel(0)).toBe(false);
+    expect(isValidLevel(2.5)).toBe(false);
     expect(isValidLevel(6)).toBe(false);
   });
-  it('fills pips up to the level', () => {
-    expect(levelPips(2)).toEqual(['#E8D36A', '#E8D36A', '#3A372C', '#3A372C', '#3A372C']);
-    expect(levelPips(null).every((c) => c === '#3A372C')).toBe(true);
+});
+
+describe('initials', () => {
+  it('makes two letters from a name', () => {
+    expect(initials('Kamran Məmmədov')).toBe('KM');
+    expect(initials('kamran_4x4')).toBe('K4');
+    expect(initials('Əli')).toBe('ƏL');
+    expect(initials('')).toBe('?');
   });
 });
 

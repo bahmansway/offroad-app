@@ -5,13 +5,16 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Choose a photo for your profile or your car."
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#14130E",
+        "backgroundColor": "#C2410C",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -23,17 +26,24 @@
       "output": "single",
       "bundler": "metro",
       "name": "Offroad",
-      "themeColor": "#14130E",
-      "backgroundColor": "#14130E"
+      "themeColor": "#F2F2F7",
+      "backgroundColor": "#F2F2F7"
     },
     "plugins": [
       "expo-router",
       "expo-status-bar",
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a photo for your profile or your car.",
+          "cameraPermission": false
+        }
+      ]
     ],
     "scheme": "offroad",
-    "backgroundColor": "#14130E",
+    "backgroundColor": "#F2F2F7",
     "experiments": {
       "typedRoutes": false
     },

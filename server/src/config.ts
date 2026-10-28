@@ -10,7 +10,8 @@ export interface AppConfig {
     loginPerIp: number; // per IP / 15 min (stops one IP trying many emails)
     register: number; // per IP / 15 min
     refresh: number; // per IP / 15 min
-    create: number; // per user / hour, each of spots, cars, mods
+    create: number; // per user / hour, separately for: spots, cars, mods, clans; photo uploads (avatar, car, logo) share one counter
+    messages: number; // per user / minute (chat)
   };
   logger: boolean;
 }
@@ -56,6 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       register: num(env.RATE_LIMIT_REGISTER, 20),
       refresh: num(env.RATE_LIMIT_REFRESH, 60),
       create: num(env.RATE_LIMIT_CREATE, 30),
+      messages: num(env.RATE_LIMIT_MESSAGES, 30),
     },
     logger: env.NODE_ENV !== 'test',
   };

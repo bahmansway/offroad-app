@@ -2,8 +2,8 @@ import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { CarForm } from '../../../components/CarForm';
 import { RequireAuth } from '../../../components/RequireAuth';
-import { ErrorState, Loading } from '../../../components/ui';
-import { goBack } from '../../../components/Screen';
+import { ErrorState, LoadingState as Loading } from '../../../components/ui';
+import { goBack } from '../../../components/ui';
 import { api } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
 import { useAsync } from '../../../lib/useAsync';
@@ -23,6 +23,7 @@ export default function EditCarScreen() {
         <CarForm
           initial={data}
           title={t('garage.editCar')}
+          backLabel={t('common.cancel')}
           onSubmit={async (input) => {
             await api.updateCar(id, input);
             goBack(`/car/${id}`);

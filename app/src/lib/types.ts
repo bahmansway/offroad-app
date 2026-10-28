@@ -8,11 +8,66 @@ export const MOD_CATEGORIES = [
 ] as const;
 export type ModCategory = (typeof MOD_CATEGORIES)[number];
 
+export type Drive = '4WD' | 'AWD' | 'FWD' | 'RWD';
+export type Transmission = 'manual' | 'automatic' | 'cvt';
+export type Fuel = 'petrol' | 'diesel' | 'hybrid' | 'electric' | 'lpg';
+export const DRIVES: Drive[] = ['4WD', 'AWD', 'FWD', 'RWD'];
+export const TRANSMISSIONS: Transmission[] = ['manual', 'automatic', 'cvt'];
+export const FUELS: Fuel[] = ['petrol', 'diesel', 'hybrid', 'electric', 'lpg'];
+
 export interface User {
   id: Id;
   displayName: string;
   createdAt: string;
   email?: string;
+  // v2 (optional so a v1 server still works)
+  avatarUrl?: string | null;
+  bio?: string | null;
+  city?: string | null;
+  currentCarId?: Id | null;
+  currentCar?: CarSummary | null;
+}
+
+/** PATCH /api/me */
+export interface MeInput {
+  displayName?: string;
+  bio?: string | null;
+  city?: string | null;
+  currentCarId?: Id | null;
+}
+
+/** Car catalog (SPEC-v2 §2) */
+export interface CatalogBrand { name: string; modelCount: number }
+export interface CatalogModel { name: string; offroad: boolean }
+export interface Trim {
+  id: string;
+  brand: string;
+  model: string;
+  generation: string;
+  yearFrom: number;
+  yearTo: number | null;
+  engine: string;
+  engineL: number;
+  hp: number;
+  drive: Drive;
+  transmission: Transmission;
+  fuel: Fuel;
+  /** where the power figure was published, e.g. "EU" */
+  market?: string;
+  /** unit of `hp` as published: metric PS (EU/RU/AU) or US hp */
+  powerUnit?: 'PS' | 'hp';
+}
+
+/** Spec fields every car can have (all optional, owner can override). */
+export interface CarSpecs {
+  trimId?: string | null;
+  engine?: string | null;
+  engineL?: number | null;
+  hp?: number | null;
+  drive?: Drive | null;
+  transmission?: Transmission | null;
+  fuel?: Fuel | null;
+  color?: string | null;
 }
 
 export interface Owner {
@@ -73,12 +128,12 @@ export interface ModInput {
 }
 
 /** List item from GET /api/cars. The contract does not spell it out, so everything beyond the basics is optional. */
-export interface CarSummary {
+export interface CarSummary extends CarSpecs {
   id: Id;
   make: string;
   model: string;
   year: number;
-  engine?: string | null;
+  photoUrl?: string | null;
   owner?: Owner;
   ratingAvg?: number | null;
   ratingCount?: number;
@@ -86,12 +141,12 @@ export interface CarSummary {
   createdAt?: string;
 }
 
-export interface Car {
+export interface Car extends CarSpecs {
   id: Id;
   make: string;
   model: string;
   year: number;
-  engine: string | null;
+  photoUrl?: string | null;
   description: string | null;
   owner: Owner;
   mods: Mod[];
@@ -103,11 +158,10 @@ export interface Car {
   createdAt: string;
 }
 
-export interface CarInput {
+export interface CarInput extends CarSpecs {
   make: string;
   model: string;
   year: number;
-  engine?: string | null;
   description?: string | null;
 }
 
@@ -117,6 +171,14 @@ export interface PublicUser {
   createdAt: string;
   cars: CarSummary[];
   spotCount: number;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  city?: string | null;
+  currentCar?: CarSummary | null;
+  /** v2 clans — filled by the server; the chat builder uses it */
+  clan?: { id: Id; name: string; tag: string; logoUrl: string | null; role: string } | null;
+  /** true when I blocked this user */
+  isBlocked?: boolean;
 }
 
 export interface AuthResponse {
@@ -130,7 +192,7 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-export type ReportTarget = 'spot' | 'car' | 'user';
+export type ReportTarget = 'spot' | 'car' | 'user' | 'message' | 'clan';
 
 export type ErrorCode =
   | 'VALIDATION' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'NOT_FOUND' | 'CONFLICT' | 'RATE_LIMITED'
