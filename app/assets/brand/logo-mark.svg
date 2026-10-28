@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="YOLCHU">
+<title>YOLCHU</title>
+<!-- Mark: a road in perspective that forks into a Y at the horizon. 100-unit grid. -->
+<path fill="#C2410C" fill-rule="evenodd" d="M33 92H67L58 62C58.5 47 66 28 79 10H69C61 23 55 33 50 42C45 33 39 23 31 10H21C34 28 41.5 47 42 62ZM48.5 70H51.5L52.3 82H47.7Z"/>
+</svg>

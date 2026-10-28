@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="505" height="100" viewBox="0 0 505 100" role="img" aria-label="YOLCHU">
+<title>YOLCHU</title>
+<!-- Dark lockup: bright orange mark + white word. Use on dark backgrounds. -->
+<path fill="#FF8A3D" fill-rule="evenodd" d="M33 92H67L58 62C58.5 47 66 28 79 10H69C61 23 55 33 50 42C45 33 39 23 31 10H21C34 28 41.5 47 42 62ZM48.5 70H51.5L52.3 82H47.7Z"/>
+<g transform="translate(124 18)" fill="#FFFFFF"><path transform="translate(0 0)" d="M0 0H14L30 25L46 0H60L36 38V64H24V38Z"/><path transform="translate(66 0)" d="M32 0A32 32 0 1 1 32 64A32 32 0 1 1 32 0ZM32 12A20 20 0 1 0 32 52A20 20 0 1 0 32 12Z"/><path transform="translate(141 0)" d="M0 0H12V52H44V64H0Z"/><path transform="translate(189 0)" d="M57.6 12.8A32 32 0 1 0 57.6 51.2L48 44A20 20 0 1 1 48 20Z"/><path transform="translate(258 0)" d="M0 0H12V26H44V0H56V64H44V38H12V64H0Z"/><path transform="translate(325 0)" d="M0 0H12V36A16 16 0 0 0 44 36V0H56V36A28 28 0 0 1 0 36Z"/></g>
+</svg>
