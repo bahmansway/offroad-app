@@ -40,6 +40,19 @@
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
-    "owner": "bahmansway"
+    "owner": "bahmansway",
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "99c3d8a0-93a8-4404-8e6c-8cebf38958a2"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/99c3d8a0-93a8-4404-8e6c-8cebf38958a2"
+    }
   }
 }
