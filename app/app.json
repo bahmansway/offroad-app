@@ -36,6 +36,9 @@
     "backgroundColor": "#14130E",
     "experiments": {
       "typedRoutes": false
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
     }
   }
 }
