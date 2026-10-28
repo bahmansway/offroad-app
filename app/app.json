@@ -50,7 +50,7 @@
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
-    "owner": "bahmansway",
+    "owner": "offroad-az",
     "extra": {
       "router": {
         "asyncRoutes": {
