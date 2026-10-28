@@ -72,16 +72,17 @@ jobs:
           EXPO_PUBLIC_API_URL: https://app-production-97e1.up.railway.app
           MSG: ${{ github.event.head_commit.message || 'Manual update' }}
         run: |
-          eas update --branch preview --message "$(echo "$MSG" | head -n1)" --non-interactive --json > ../update.json
+          eas update --channel preview --message "$(echo "$MSG" | head -n1)" --non-interactive --json > ../update.json
 
       - name: Show QR code
         run: |
           PID=$(jq -r '.expo.extra.eas.projectId' app.json)
-          GROUP=$(jq -r '.[0].group' ../update.json)
-          QR="https://qr.expo.dev/eas-update?slug=exp&projectId=$PID&groupId=$GROUP"
+          RV=$(jq -r '.[0].runtimeVersion' ../update.json)
+          # Stable link: always opens the newest update on the "preview" channel.
+          QR="https://qr.expo.dev/eas-update?slug=exp&projectId=$PID&runtimeVersion=$RV&channel=preview"
           {
             echo "## Open in Expo Go"
-            echo "Scan this with your phone camera (iPhone) or the Expo Go app (Android):"
+            echo "This QR code always opens the newest version. Scan it with your phone camera (iPhone) or the Expo Go app (Android):"
             echo ""
             echo "![QR code]($QR)"
             echo ""
