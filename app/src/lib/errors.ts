@@ -33,10 +33,10 @@ export function errorMessage(e: unknown, t: T, context: ErrorContext = 'default'
   return t('errors.generic');
 }
 
-/** Chat send errors → short sentence. */
-export function chatErrorMessage(e: unknown, t: T): string {
+/** Chat send errors → short sentence. In a clan chat 403 means "not a member any more"; in a DM it means blocked. */
+export function chatErrorMessage(e: unknown, t: T, kind: 'dm' | 'clan' | null = 'dm'): string {
   if (e instanceof ApiError) {
-    if (e.code === 'FORBIDDEN') return t('chat.blockedCannotSend');
+    if (e.code === 'FORBIDDEN') return kind === 'clan' ? t('chat.noAccess') : t('chat.blockedCannotSend');
     if (e.code === 'RATE_LIMITED') return t('chat.rateLimited');
     if (e.code === 'NOT_FOUND') return t('chat.noAccess');
   }
@@ -47,10 +47,12 @@ export function chatErrorMessage(e: unknown, t: T): string {
 export function clanErrorMessage(e: unknown, t: T, kind: 'save' | 'action' = 'action'): string {
   if (e instanceof ApiError) {
     if (e.code === 'CONFLICT') {
-      if (/name|tag/i.test(e.message)) return t('clan.nameTaken');
-      if (/already in a clan/i.test(e.message)) return t('clan.alreadyInClan');
-      if (/hand over|leader/i.test(e.message)) return t('clan.leaderLeaveHint');
-      if (/other members/i.test(e.message)) return t('clan.deleteHint');
+      // Match the server's exact sentences (routes/clans.ts); most specific first.
+      const m = e.message;
+      if (/remove the other members/i.test(m)) return t('clan.deleteHint');
+      if (/clan with this (name|tag) already exists/i.test(m)) return t('clan.nameTaken');
+      if (/already in (a|this) clan/i.test(m)) return t('clan.alreadyInClan');
+      if (/^hand over leadership first/i.test(m)) return t('clan.leaderLeaveHint');
       return t('clan.changed');
     }
     if (e.code === 'FORBIDDEN' || e.code === 'NOT_FOUND') return t('clan.changed');

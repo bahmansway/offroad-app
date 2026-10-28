@@ -120,8 +120,10 @@ function Chat() {
       setSendError(null);
     } catch (e) {
       setItems((cur) => setStatus(cur, clientId, 'failed'));
-      setSendError(chatErrorMessage(e, t));
-      if (e instanceof ApiError && e.status === 404) setNoAccess(true);
+      const kind = conv?.type ?? null;
+      setSendError(chatErrorMessage(e, t, kind));
+      // 404 = chat gone; 403 in a clan chat = removed from the clan (in a DM, 403 means blocked)
+      if (e instanceof ApiError && (e.status === 404 || (e.status === 403 && kind === 'clan'))) setNoAccess(true);
     }
   }
 
@@ -225,7 +227,13 @@ function Chat() {
             ) : undefined
           }
           renderItem={({ item }) => (
-            <RowView row={item} clan={isClan} words={words} onMenu={(m) => (menuActions(m).length ? setMenu(m) : null)} />
+            <RowView
+              row={item}
+              clan={isClan}
+              words={words}
+              hasMenu={item.kind === 'msg' && menuActions(item.msg).length > 0}
+              onMenu={(m) => (menuActions(m).length ? setMenu(m) : null)}
+            />
           )}
         />
       )}
@@ -248,8 +256,10 @@ function Chat() {
   );
 }
 
-function RowView({ row, clan, words, onMenu }: {
+function RowView({ row, clan, words, onMenu, hasMenu }: {
   row: ChatRow; clan: boolean; words: { today: string; yesterday: string; months: string[] }; onMenu: (m: ChatItem) => void;
+  /** false for my own sent messages: no long-press menu, so no hint */
+  hasMenu: boolean;
 }) {
   const { c } = useTheme();
   const { t } = useI18n();
@@ -287,14 +297,14 @@ function RowView({ row, clan, words, onMenu }: {
           <Txt variant="caption" tone="label2" style={{ paddingHorizontal: 12 }} numberOfLines={1}>{msg.sender.displayName}</Txt>
         ) : null}
         <Pressable
-          onLongPress={() => { tapFeedback(); onMenu(msg); }}
+          onLongPress={hasMenu ? () => { tapFeedback(); onMenu(msg); } : undefined}
           onPress={failed ? () => onMenu(msg) : undefined}
           delayLongPress={350}
           accessibilityRole={failed ? 'button' : undefined}
           accessibilityLabel={a11y}
-          accessibilityHint={t('chat.messageActions')}
-          accessibilityActions={[{ name: 'longpress', label: t('chat.messageActions') }]}
-          onAccessibilityAction={() => onMenu(msg)}
+          accessibilityHint={hasMenu ? t('chat.messageActions') : undefined}
+          accessibilityActions={hasMenu ? [{ name: 'longpress', label: t('chat.messageActions') }] : undefined}
+          onAccessibilityAction={hasMenu ? () => onMenu(msg) : undefined}
           style={({ pressed }) => [
             {
               paddingHorizontal: 12, paddingVertical: 8, borderRadius: R,

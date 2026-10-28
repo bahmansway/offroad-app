@@ -206,3 +206,15 @@ describe('ordering and rows', () => {
     expect(previewText(c2, 'u1', 'Siz')).toBe('Rauf: hey there');
   });
 });
+
+describe('row keys', () => {
+  it('two senders with the same clientId get different keys; optimistic and confirmed copies share one', () => {
+    const p = pendingMessage({ conversationId: 'c1', text: 'hi', clientId: 'same', me });
+    const theirs = msg('m5', '2026-10-28T10:00:00.000Z', other, 'same');
+    const rows = buildRows(mergeMessages([p], [theirs]), 'u1').filter((r) => r.kind === 'msg');
+    expect(new Set(rows.map((r) => r.key)).size).toBe(2);
+    const before = buildRows([p], 'u1').find((r) => r.kind === 'msg')!.key;
+    const after = buildRows(mergeMessages([p], [msg('m6', '2026-10-28T10:01:00.000Z', me, 'same', 'hi')]), 'u1').find((r) => r.kind === 'msg')!.key;
+    expect(after).toBe(before);
+  });
+});

@@ -198,7 +198,8 @@ export function buildRows(items: ChatItem[], myId: Id | null | undefined): ChatR
       && Math.abs(Date.parse(b.createdAt) - Date.parse(a.createdAt)) < RUN_GAP_MS;
     rows.push({
       kind: 'msg',
-      key: m.clientId && isLocal(m) ? `c:${m.clientId}` : m.clientId ? `c:${m.clientId}` : `m:${m.id}`,
+      // clientIds are only unique per sender; the optimistic and confirmed copy share this key (no remount)
+      key: m.clientId ? `c:${m.sender.id}:${m.clientId}` : `m:${m.id}`,
       msg: m,
       mine: sameId(m.sender.id, myId),
       firstOfRun: !sameRun(prev, m),

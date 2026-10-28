@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import { EmptyState, ErrorState, LoadingState, NavScreen, PillButton, SearchField, Section } from '../components/ui';
 import { ClanCell } from '../components/ClanBits';
@@ -15,22 +15,34 @@ export default function ClansScreen() {
   const [items, setItems] = useState<Clan[] | null>(null);
   const [error, setError] = useState<unknown>(null);
 
+  const seq = useRef(0);
+  const qRef = useRef(q);
+  qRef.current = q;
+
+  /** Only the newest request may update the list (a slow old search must not overwrite a newer one). */
   const load = useCallback(async (query: string) => {
+    const id = ++seq.current;
     setError(null);
     try {
       const r = await api.clans(query.trim() || undefined);
-      setItems(r.items);
+      if (id === seq.current) setItems(r.items);
     } catch (e) {
-      setError(e);
+      if (id === seq.current) setError(e);
     }
   }, []);
 
-  // search as you type (short pause)
+  // search as you type (short pause); the first load comes from the focus effect below
+  const firstQ = useRef(true);
   useEffect(() => {
-    const h = setTimeout(() => load(q), q ? 300 : 0);
+    if (firstQ.current) {
+      firstQ.current = false;
+      return;
+    }
+    const h = setTimeout(() => load(q), 300);
     return () => clearTimeout(h);
   }, [q, load]);
-  useFocusEffect(useCallback(() => { load(q); }, [load])); // eslint-disable-line react-hooks/exhaustive-deps
+  // every time the page is shown (first open, and back from a clan page)
+  useFocusEffect(useCallback(() => { load(qRef.current); }, [load]));
 
   const mine = items?.find((c) => c.myRole === 'leader' || c.myRole === 'member');
   const pending = items?.filter((c) => c.myRole === 'pending') ?? [];

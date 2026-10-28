@@ -44,36 +44,50 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const listeners = useRef(new Map<string, Set<MessageListener>>());
   const catchUps = useRef(new Set<PollListener>());
   const rt = useRef<RealtimeClient | null>(null);
-  const loading = useRef<Promise<void> | null>(null);
+  const loading = useRef<{ session: number; p: Promise<void> } | null>(null);
+  /** Bumped on every login/logout: results of requests started in an older session are dropped. */
+  const session = useRef(0);
+  /** Mirror of `conversations`, so event handlers decide from the current list (not inside an updater). */
+  const listRef = useRef<Conversation[] | null>(null);
+
+  const setList = useCallback((next: Conversation[] | null) => {
+    listRef.current = next;
+    setConversations(next);
+  }, []);
 
   const reload = useCallback(async () => {
     if (!myIdRef.current) return;
-    if (loading.current) return loading.current;
+    const my = session.current;
+    if (loading.current && loading.current.session === my) return loading.current.p;
     const p = (async () => {
       try {
         const list = await api.conversations();
+        if (my !== session.current) return; // logged out / another user meanwhile
         const open = openRef.current;
         // the open chat is being read right now
-        setConversations(sortConversations(open ? markReadLocal(list, open) : list));
+        setList(sortConversations(open ? markReadLocal(list, open) : list));
         setError(null);
       } catch (e) {
-        setError(e);
+        if (my === session.current) setError(e);
       }
-    })().finally(() => { loading.current = null; });
-    loading.current = p;
+    })().finally(() => {
+      if (loading.current?.p === p) loading.current = null;
+    });
+    loading.current = { session: my, p };
     return p;
-  }, []);
+  }, [setList]);
 
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
 
   // Start/stop the socket with the session.
   useEffect(() => {
-    if (!myId) {
-      setConversations(null);
-      setError(null);
-      return;
-    }
+    session.current++;
+    loading.current = null;
+    setList(null);
+    setError(null);
+    if (!myId) return;
+    const my = session.current;
     const c = createRealtimeClient({
       url: API_URL,
       io: io as unknown as IoFactory,
@@ -84,15 +98,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         listeners.current.get(String(m.conversationId))?.forEach((fn) => fn(m));
       },
       onConversation: (u) => {
-        let unknown = false;
-        setConversations((list) => {
-          if (!list) return list;
-          const r = applyConversationUpdate(list, u, { myId: myIdRef.current, openId: openRef.current });
-          if (!r.known) unknown = true;
-          return r.list;
-        });
+        if (my !== session.current) return;
+        const list = listRef.current;
+        if (!list) {
+          reloadRef.current(); // first load still running or failed
+          return;
+        }
+        const r = applyConversationUpdate(list, u, { myId: myIdRef.current, openId: openRef.current });
+        if (r.known) setList(r.list);
         // a new DM or a clan we just joined: fetch the list again
-        if (unknown) reloadRef.current();
+        else reloadRef.current();
       },
       onReady: () => {
         reloadRef.current();
@@ -135,17 +150,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       c.stop();
       rt.current = null;
     };
-  }, [myId]);
+  }, [myId, setList]);
 
   const setOpen = useCallback((id: Id | null) => {
     openRef.current = id;
-    if (id) setConversations((l) => (l ? markReadLocal(l, id) : l));
-  }, []);
+    if (id && listRef.current) setList(markReadLocal(listRef.current, id));
+  }, [setList]);
 
   const markRead = useCallback((id: Id) => {
-    setConversations((l) => (l ? markReadLocal(l, id) : l));
+    if (listRef.current) setList(markReadLocal(listRef.current, id));
     api.markRead(id).catch(() => { /* next load fixes the count */ });
-  }, []);
+  }, [setList]);
 
   const subscribe = useCallback((conversationId: Id, fn: MessageListener) => {
     const k = String(conversationId);
@@ -165,9 +180,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const openDm = useCallback(async (userId: Id) => {
     const conv = await api.startDm(userId);
-    setConversations((l) => (l && !l.some((c) => String(c.id) === String(conv.id)) ? sortConversations([conv, ...l]) : l));
+    const l = listRef.current;
+    if (l && !l.some((c) => String(c.id) === String(conv.id))) setList(sortConversations([conv, ...l]));
     router.push(`/chat/${conv.id}`);
-  }, []);
+  }, [setList]);
 
   // "Mesaj yaz" on public profiles. Errors (403 blocked etc.) go back to the profile screen.
   useEffect(() => {

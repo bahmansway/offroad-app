@@ -27,6 +27,7 @@ export default function ClanScreen() {
   const [clan, setClan] = useState<Clan | null>(null);
   const [members, setMembers] = useState<ClanMember[] | null>(null);
   const [requests, setRequests] = useState<ClanRequest[] | null>(null);
+  const [requestsError, setRequestsError] = useState<unknown>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -41,9 +42,14 @@ export default function ClanScreen() {
       setClan(cl);
       setMembers(m.items);
       setGone(false);
+      setRequestsError(null);
       if (cl.myRole === 'leader') {
-        const r = await api.clanRequests(id).catch(() => ({ items: [] as ClanRequest[] }));
-        setRequests(r.items);
+        try {
+          setRequests((await api.clanRequests(id)).items);
+        } catch (e) {
+          setRequests(null);
+          setRequestsError(e);
+        }
       } else setRequests(null);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) setGone(true);
@@ -178,7 +184,9 @@ export default function ClanScreen() {
 
       {isLeader ? (
         <Section header={t('clan.requests')}>
-          {requests && requests.length ? requests.map((r) => (
+          {requestsError ? (
+            <Cell title={errorMessage(requestsError, t)} subtitle={t('common.retry')} action onPress={load} chevron={false} />
+          ) : requests === null ? <LoadingState inline /> : requests.length ? requests.map((r) => (
             <Cell
               key={r.user.id}
               title={r.user.displayName}

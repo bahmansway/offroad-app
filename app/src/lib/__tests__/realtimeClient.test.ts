@@ -1,4 +1,4 @@
-import { BACKOFF, createRealtimeClient, type SocketLike, type Timers } from '../realtimeClient';
+import { BACKOFF, createRealtimeClient, MAX_AUTH_FAILS, type SocketLike, type Timers } from '../realtimeClient';
 
 /** Fake socket.io socket: records connect() calls and lets the test fire events. */
 class FakeSocket implements SocketLike {
@@ -245,5 +245,51 @@ describe('realtime client', () => {
     for (const h of handlers.get('connect_error') ?? []) h({ message: 'UNAUTHORIZED' });
     await flush();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('repeated UNAUTHORIZED after a successful refresh: backs off, gives up after 3 and stays on polling', async () => {
+    const { rt, sockets, timers, refresh, onPoll } = setup({ refreshTo: ['A2', 'A3', 'A4', 'A5'] });
+    rt.start();
+    await flush();
+    const s = sockets[0];
+    s.active = false;
+    s.emit('connect_error', { message: 'UNAUTHORIZED' }); // 1st: refresh at once
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    s.emit('connect_error', { message: 'UNAUTHORIZED' }); // 2nd: no immediate refresh…
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    timers.advance(BACKOFF[0]); // …only after a pause
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    for (let i = 2; i < MAX_AUTH_FAILS; i++) s.emit('connect_error', { message: 'UNAUTHORIZED' }); // 3rd: give up
+    await flush();
+    timers.advance(120_000);
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    const connects = s.connects.length;
+    expect(onPoll.mock.calls.length).toBeGreaterThanOrEqual(10); // still fetching every 10 s
+    // coming back to the app tries again
+    rt.foreground();
+    await flush();
+    expect(s.connects.length).toBe(connects + 1);
+  });
+
+  it('a successful connect resets the auth failure count', async () => {
+    const { rt, sockets, timers, refresh } = setup({ refreshTo: ['A2', 'A3', 'A4'] });
+    rt.start();
+    await flush();
+    const s = sockets[0];
+    s.active = false;
+    s.emit('connect_error', { message: 'UNAUTHORIZED' });
+    await flush();
+    s.emit('connect_error', { message: 'UNAUTHORIZED' });
+    timers.advance(BACKOFF[0]);
+    await flush();
+    s.ready(); // connected fine
+    s.connected = false;
+    s.emit('connect_error', { message: 'UNAUTHORIZED' }); // counts from 1 again → immediate refresh
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(3);
   });
 });

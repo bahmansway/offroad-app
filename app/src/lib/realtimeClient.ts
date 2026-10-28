@@ -54,6 +54,8 @@ export interface RealtimeOptions {
 
 /** Waits between manual reconnect attempts (ms). */
 export const BACKOFF = [1000, 2000, 5000, 10000, 30000];
+/** After this many UNAUTHORIZED rejections in a row (even with fresh tokens) stop trying; polling continues. */
+export const MAX_AUTH_FAILS = 3;
 
 const defaultTimers: Timers = {
   setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -73,6 +75,9 @@ export function createRealtimeClient(o: RealtimeOptions) {
   let retryTimer: unknown = null;
   let pollTimer: unknown = null;
   let refreshing = false;
+  /** UNAUTHORIZED rejections since the last successful connect */
+  let authFails = 0;
+  let gaveUp = false;
   /** bumps on stop() so late async work from an old session does nothing */
   let session = 0;
 
@@ -168,6 +173,8 @@ export function createRealtimeClient(o: RealtimeOptions) {
   function wire(s: SocketLike) {
     s.on('ready', () => {
       attempt = 0;
+      authFails = 0;
+      gaveUp = false;
       clearRetry();
       setStatus('connected');
       o.onReady?.();
@@ -178,7 +185,16 @@ export function createRealtimeClient(o: RealtimeOptions) {
       if (stopped) return;
       setStatus('offline');
       if (err?.message === 'UNAUTHORIZED') {
-        refreshAndReconnect();
+        authFails++;
+        if (authFails >= MAX_AUTH_FAILS) {
+          // the server keeps rejecting even fresh tokens: stop, stay on polling until foreground()/start()
+          gaveUp = true;
+          clearRetry();
+          return;
+        }
+        // first rejection: refresh right away; repeated ones: wait (backoff) before refreshing again
+        if (authFails === 1) refreshAndReconnect();
+        else scheduleRetry(() => { refreshAndReconnect(); });
       } else if (!s.active) {
         scheduleRetry(() => { connectNow(); });
       }
@@ -190,7 +206,7 @@ export function createRealtimeClient(o: RealtimeOptions) {
       if (reason === 'io server disconnect') {
         // the server dropped us: usually the access token expired
         refreshAndReconnect();
-      } else if (reason === 'io client disconnect') {
+      } else if (reason === 'io client disconnect' || gaveUp) {
         // we called disconnect() ourselves
       } else if (!s.active) {
         scheduleRetry(() => { connectNow(); });
@@ -203,6 +219,8 @@ export function createRealtimeClient(o: RealtimeOptions) {
       if (!stopped) return;
       stopped = false;
       attempt = 0;
+      authFails = 0;
+      gaveUp = false;
       connectNow();
     },
     stop() {
@@ -224,6 +242,8 @@ export function createRealtimeClient(o: RealtimeOptions) {
       if (stopped) return;
       if (socket?.connected && status === 'connected') return;
       attempt = 0;
+      authFails = 0;
+      gaveUp = false;
       clearRetry();
       connectNow();
     },
