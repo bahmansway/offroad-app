@@ -106,6 +106,10 @@ describe('car body from a trim', () => {
       engineL: 4, hp: 282, drive: '4WD', transmission: 'automatic', fuel: 'petrol',
     });
   });
+  it('converts PS trims to hp', () => {
+    const t = trim({ hp: 286, powerUnit: 'PS' } as never);
+    expect(carInputFromTrim('Toyota', 'Land Cruiser', 2016, t).hp).toBe(282);
+  });
   it('works without a trim and trims long names to the server limits', () => {
     expect(carInputFromTrim(' Lada ', 'Niva Legend', 2021, null)).toEqual({ make: 'Lada', model: 'Niva Legend', year: 2021 });
     expect(carInputFromTrim('B'.repeat(50), 'M'.repeat(70), 2020, null).make).toHaveLength(40);

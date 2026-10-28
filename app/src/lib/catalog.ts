@@ -114,7 +114,8 @@ export function carInputFromTrim(brand: string, model: string, year: number, tri
     trimId: trim.id,
     engine: trim.engine.slice(0, 40),
     engineL: trim.engineL,
-    hp: trim.hp,
+    // Cars store power in hp; PS figures are converted (1 PS = 0.986 hp).
+    hp: trim.powerUnit === 'PS' ? Math.round(trim.hp * 0.98632) : trim.hp,
     drive: trim.drive,
     transmission: trim.transmission,
     fuel: trim.fuel,

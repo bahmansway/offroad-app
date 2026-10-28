@@ -21,7 +21,7 @@ export function OfflineBanner() {
     >
       <Txt variant="footnote" color={c.tintSoftText} style={{ flex: 1 }}>{t('errors.offline')}</Txt>
       <Pressable accessibilityRole="button" onPress={retry} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 }} hitSlop={6}>
-        <Txt variant="subhead" tone="tint" style={{ fontWeight: '600' }}>{t('common.retry')}</Txt>
+        <Txt variant="subhead" color={c.tintSoftText} style={{ fontWeight: '600' }}>{t('common.retry')}</Txt>
       </Pressable>
     </View>
   );

@@ -20,7 +20,7 @@ import type { CarSummary } from '../../lib/types';
 export default function ProfileScreen() {
   const { t, lang, setLang } = useI18n();
   const { c, pref } = useTheme();
-  const { user, logout, offline, retry, updateUser } = useAuth();
+  const { user, logout, offline, retry, updateUser, refreshUser } = useAuth();
   const [cars, setCars] = useState<CarSummary[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +28,8 @@ export default function ProfileScreen() {
   useFocusEffect(useCallback(() => {
     if (!user) { setCars(null); return; }
     api.cars(user.id).then((r) => setCars(r.items)).catch(() => setCars([]));
+    // Current car may have been edited, re-photographed or deleted elsewhere.
+    refreshUser().catch(() => {});
   }, [user?.id]));
 
   async function doLogout() {
