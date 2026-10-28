@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { I18nProvider } from '../lib/i18n';
 import { AuthProvider } from '../lib/auth';
+import { ChatProvider } from '../lib/chat';
 import { ThemeProvider, useTheme } from '../lib/themeContext';
 import { palettes } from '../lib/theme';
 import { OfflineBanner } from '../components/OfflineBanner';
@@ -36,6 +37,8 @@ function AppStack() {
         <Stack.Screen name="profile/edit" options={sheet} />
         <Stack.Screen name="profile/current-car" options={sheet} />
         <Stack.Screen name="about" options={sheet} />
+        <Stack.Screen name="clan/new" options={sheet} />
+        <Stack.Screen name="clan/edit/[id]" options={sheet} />
       </Stack>
     </>
   );
@@ -49,7 +52,9 @@ export default function RootLayout() {
       <ThemeProvider>
         <I18nProvider>
           <AuthProvider>
-            <AppStack />
+            <ChatProvider>
+              <AppStack />
+            </ChatProvider>
           </AuthProvider>
         </I18nProvider>
       </ThemeProvider>

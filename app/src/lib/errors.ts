@@ -32,3 +32,34 @@ export function errorMessage(e: unknown, t: T, context: ErrorContext = 'default'
   }
   return t('errors.generic');
 }
+
+/** Chat send errors → short sentence. */
+export function chatErrorMessage(e: unknown, t: T): string {
+  if (e instanceof ApiError) {
+    if (e.code === 'FORBIDDEN') return t('chat.blockedCannotSend');
+    if (e.code === 'RATE_LIMITED') return t('chat.rateLimited');
+    if (e.code === 'NOT_FOUND') return t('chat.noAccess');
+  }
+  return errorMessage(e, t);
+}
+
+/** Clan action errors. 403/404/409 mean the clan changed under us: the caller reloads it. */
+export function clanErrorMessage(e: unknown, t: T, kind: 'save' | 'action' = 'action'): string {
+  if (e instanceof ApiError) {
+    if (e.code === 'CONFLICT') {
+      if (/name|tag/i.test(e.message)) return t('clan.nameTaken');
+      if (/already in a clan/i.test(e.message)) return t('clan.alreadyInClan');
+      if (/hand over|leader/i.test(e.message)) return t('clan.leaderLeaveHint');
+      if (/other members/i.test(e.message)) return t('clan.deleteHint');
+      return t('clan.changed');
+    }
+    if (e.code === 'FORBIDDEN' || e.code === 'NOT_FOUND') return t('clan.changed');
+    if (e.code === 'VALIDATION' && kind === 'save') return t('errors.validation');
+  }
+  return errorMessage(e, t, kind === 'save' ? 'create' : 'default');
+}
+
+/** True for errors after which the clan page should reload itself. */
+export function clanShouldReload(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 403 || e.status === 404 || e.status === 409);
+}

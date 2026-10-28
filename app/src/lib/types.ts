@@ -197,3 +197,75 @@ export type ReportTarget = 'spot' | 'car' | 'user' | 'message' | 'clan';
 export type ErrorCode =
   | 'VALIDATION' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'NOT_FOUND' | 'CONFLICT' | 'RATE_LIMITED'
   | 'NETWORK' | 'UNKNOWN';
+
+// ---------- v2 clans & chat (SPEC-v2 §4 + "Server notes for app builders") ----------
+export type ClanRole = 'leader' | 'member' | 'pending' | null;
+
+export interface UserRef {
+  id: Id;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+export interface Clan {
+  id: Id;
+  name: string;
+  tag: string;
+  description: string;
+  logoUrl: string | null;
+  city: string | null;
+  isOpen: boolean;
+  leader: { id: Id; displayName: string; avatarUrl?: string | null };
+  memberCount: number;
+  myRole: ClanRole;
+  /** null unless I am a member */
+  conversationId: Id | null;
+  createdAt: string;
+}
+
+export interface ClanInput {
+  name: string;
+  tag: string;
+  description?: string;
+  city?: string | null;
+  isOpen?: boolean;
+}
+
+export interface ClanMember {
+  user: UserRef;
+  role: 'leader' | 'member';
+  joinedAt: string;
+}
+
+export interface ClanRequest {
+  user: UserRef;
+  createdAt: string;
+}
+
+export interface Message {
+  id: Id;
+  conversationId: Id;
+  sender: UserRef;
+  text: string;
+  createdAt: string;
+  clientId: string | null;
+}
+
+export interface Conversation {
+  id: Id;
+  type: 'dm' | 'clan';
+  title: string;
+  avatarUrl: string | null;
+  clanId: Id | null;
+  otherUser: UserRef | null;
+  lastMessage: Message | null;
+  unreadCount: number;
+  updatedAt: string;
+}
+
+/** `conversation:updated` socket payload */
+export interface ConversationUpdate {
+  id: Id;
+  lastMessage: Message;
+  updatedAt: string;
+}

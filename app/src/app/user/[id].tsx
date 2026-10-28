@@ -11,14 +11,22 @@ import { errorMessage } from '../../lib/errors';
 import { formatDate, sameId } from '../../lib/format';
 import { HAIRLINE } from '../../lib/theme';
 import { getSendMessageHandler } from '../../lib/chatHooks';
+import { chatErrorMessage } from '../../lib/errors';
+import { confirmAsync } from '../../lib/dialogs';
+import { useChat } from '../../lib/chat';
+import { ClanLogo } from '../../components/ClanBits';
 
 export default function UserScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useI18n();
   const { c } = useTheme();
   const { user: me } = useAuth();
-  const { data: u, error, loading, reload } = useAsync(() => api.user(id), [id]);
+  const { data: u, setData, error, loading, reload } = useAsync(() => api.user(id), [id]);
+  const chat = useChat();
   const [soon, setSoon] = useState(false);
+  const [dmBusy, setDmBusy] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
 
   if (loading) return <LoadingState />;
   if (error || !u) return <NavScreen><ErrorState message={errorMessage(error, t)} onRetry={reload} /></NavScreen>;
@@ -27,11 +35,38 @@ export default function UserScreen() {
   const current = u.currentCar ?? null;
   const others = u.cars.filter((car) => !sameId(car.id, current?.id));
 
-  function message() {
+  async function message() {
     if (!me) return router.push('/login');
     const h = getSendMessageHandler();
-    if (h) return h(u!);
-    setSoon(true);
+    if (!h) return setSoon(true);
+    setDmBusy(true);
+    setNote(null);
+    try {
+      await h(u!);
+    } catch (e) {
+      setNote({ text: chatErrorMessage(e, t), error: true });
+    } finally {
+      setDmBusy(false);
+    }
+  }
+
+  async function toggleBlock() {
+    if (!me) return router.push('/login');
+    const blocking = !u!.isBlocked;
+    if (blocking && !(await confirmAsync(t('profile.blockConfirm', { name: u!.displayName }), t('profile.block'), t('common.cancel')))) return;
+    setBlockBusy(true);
+    setNote(null);
+    try {
+      if (blocking) await api.block(u!.id);
+      else await api.unblock(u!.id);
+      setData({ ...u!, isBlocked: blocking });
+      setNote({ text: blocking ? t('profile.blocked') : t('profile.unblocked'), error: false });
+      chat.reload(); // hidden messages change the list
+    } catch (e) {
+      setNote({ text: errorMessage(e, t), error: true });
+    } finally {
+      setBlockBusy(false);
+    }
   }
 
   return (
@@ -47,8 +82,11 @@ export default function UserScreen() {
 
       {!isMe ? (
         <View style={{ gap: 6 }}>
-          <PillButton title={t('profile.sendMessage')} icon="message" onPress={message} />
+          <PillButton title={t('profile.sendMessage')} icon="message" onPress={message} loading={dmBusy} disabled={!!u.isBlocked} />
           {soon ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite">{t('profile.messageSoon')}</Txt> : null}
+          {note ? (
+            <Txt variant="footnote" tone={note.error ? 'destructive' : 'label2'} center role={note.error ? 'alert' : undefined} accessibilityLiveRegion="polite">{note.text}</Txt>
+          ) : u.isBlocked ? <Txt variant="footnote" tone="label2" center>{t('profile.blocked')}</Txt> : null}
         </View>
       ) : (
         <PillButton title={t('profile.edit')} variant="gray" icon="edit" onPress={() => router.push('/profile/edit')} />
@@ -61,6 +99,18 @@ export default function UserScreen() {
         <View style={{ width: HAIRLINE, backgroundColor: c.separator }} />
         <Stat k={t('profile.cars')} v={String(u.cars.length)} />
       </Card>
+
+      {u.clan ? (
+        <Section header={t('clan.clanHeader')}>
+          <Cell
+            title={u.clan.name}
+            subtitle={`[${u.clan.tag}] · ${u.clan.role === 'leader' ? t('clan.leader') : t('clan.member')}`}
+            left={<ClanLogo clan={u.clan} size={40} />}
+            onPress={() => router.push(`/clan/${u.clan!.id}`)}
+            accessibilityRole="link"
+          />
+        </Section>
+      ) : null}
 
       {current ? (
         <Section header={t('profile.currentCar')}>
@@ -78,6 +128,15 @@ export default function UserScreen() {
 
       {!isMe ? (
         <Section>
+          <Cell
+            title={u.isBlocked ? t('profile.unblock') : t('profile.block')}
+            destructive={!u.isBlocked}
+            action={!!u.isBlocked}
+            center
+            chevron={false}
+            disabled={blockBusy}
+            onPress={toggleBlock}
+          />
           <Cell
             title={t('profile.report')}
             destructive

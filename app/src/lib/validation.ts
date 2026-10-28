@@ -69,3 +69,15 @@ export function validateProfile(v: { displayName: string; city: string; bio: str
     bio: len(v.bio) <= 300 ? null : 'profile.bioTooLong',
   };
 }
+
+/** Same rules as the server's clan schema (SPEC-v2 §4). Tag: 2–5 letters/digits, any alphabet. */
+export const CLAN_TAG_RE = /^[\p{L}\p{N}]{2,5}$/u;
+
+export function validateClan(v: { name: string; tag: string; city: string; description: string }) {
+  return {
+    name: between(v.name, 3, 40) ? null : 'clan.nameInvalid',
+    tag: CLAN_TAG_RE.test(v.tag.trim()) ? null : 'clan.tagInvalid',
+    city: len(v.city) <= 60 ? null : 'clan.cityInvalid',
+    description: len(v.description) <= 500 ? null : 'clan.descriptionInvalid',
+  };
+}

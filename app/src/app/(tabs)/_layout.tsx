@@ -3,10 +3,14 @@ import { Tabs } from 'expo-router/js-tabs';
 import { FloatingTabBar } from '../../components/ui/TabBar';
 import { useTheme } from '../../lib/themeContext';
 import { useI18n } from '../../lib/i18n';
+import { useChat } from '../../lib/chat';
+import { badgeText } from '../../lib/chatLogic';
 
 export default function TabsLayout() {
   const { t } = useI18n();
   const { c } = useTheme();
+  const { unread } = useChat();
+  const badge = badgeText(unread);
   const soon = ` (${t('common.comingSoon')})`;
   return (
     <Tabs
@@ -19,7 +23,14 @@ export default function TabsLayout() {
       <Tabs.Screen name="index" options={{ title: t('tabs.explore') }} />
       <Tabs.Screen name="events" options={{ title: t('tabs.events'), tabBarAccessibilityLabel: t('tabs.events') + soon }} />
       <Tabs.Screen name="garage" options={{ title: t('tabs.garage') }} />
-      <Tabs.Screen name="chat" options={{ title: t('tabs.chat') }} />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: t('tabs.chat'),
+          tabBarBadge: badge,
+          tabBarAccessibilityLabel: badge ? `${t('tabs.chat')}, ${t('chat.unread', { count: unread })}` : t('tabs.chat'),
+        }}
+      />
       <Tabs.Screen name="profile" options={{ title: t('tabs.profile') }} />
     </Tabs>
   );
