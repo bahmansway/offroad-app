@@ -22,6 +22,11 @@ A community app that brings all offroad drivers into one place. Launch market: *
 - Railway hobby plan: API service + Postgres + bucket. Website build served from the API service.
 - Phone apps: Expo Go for testing; store builds later via EAS when Bahman is ready.
 
+## Live
+- Website: https://app-production-97e1.up.railway.app
+- Repo: github.com/bahmansway/offroad-app (push to main deploys)
+- Railway project `offroad-app`: services `app` (repo root Dockerfile) + `Postgres`. Vars: DATABASE_URL=${{Postgres.DATABASE_URL}}, JWT_SECRET, NODE_ENV=production.
+
 ## Local testing
 ```
 cd server && npm install && npm run dev     # API on :4000 (needs DATABASE_URL)
