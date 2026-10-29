@@ -8,6 +8,8 @@ import { deleteImage, imageUrl, MAX_UPLOAD_BYTES, storeImage } from '../lib/imag
 import { makeLimiter } from '../lib/limits.js';
 import { isForeignKeyViolation, privateUser, userRef, userRefCols } from '../lib/users.js';
 import { loadCarSummaries } from './cars.js';
+import { clanTitle } from './clans.js';
+import { cutTies, friendFields } from '../lib/friends.js';
 
 const optText = (max: number) =>
   z
@@ -43,12 +45,28 @@ export async function loadMe(db: Db, userId: string) {
 /** The clan a user is in (badge on profiles), or null. */
 export async function userClan(db: Db, userId: string) {
   const [row] = await db
-    .select({ id: clans.id, name: clans.name, tag: clans.tag, logoImageId: clans.logoImageId, role: clanMembers.role })
+    .select({
+      id: clans.id,
+      name: clans.name,
+      tag: clans.tag,
+      logoImageId: clans.logoImageId,
+      role: clanMembers.role,
+      joinedAt: clanMembers.joinedAt,
+    })
     .from(clanMembers)
     .innerJoin(clans, eq(clans.id, clanMembers.clanId))
     .where(eq(clanMembers.userId, userId))
     .limit(1);
-  return row ? { id: row.id, name: row.name, tag: row.tag, logoUrl: imageUrl(row.logoImageId), role: row.role } : null;
+  return row
+    ? {
+        id: row.id,
+        name: row.name,
+        tag: row.tag,
+        logoUrl: imageUrl(row.logoImageId),
+        role: row.role,
+        title: clanTitle(row.role, row.joinedAt),
+      }
+    : null;
 }
 
 export async function profileRoutes(app: FastifyInstance) {
@@ -146,6 +164,7 @@ export async function profileRoutes(app: FastifyInstance) {
       spotCount: sc.n,
       clan: await userClan(db, id),
       isBlocked,
+      ...(await friendFields(db, req.userId, id)),
     };
   });
 
@@ -155,7 +174,11 @@ export async function profileRoutes(app: FastifyInstance) {
     if (id === req.userId) throw badRequest('You cannot block yourself');
     const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
     if (!u) throw notFound('User not found');
-    await db.insert(blocks).values({ blockerId: req.userId!, blockedId: id }).onConflictDoNothing();
+    await db.transaction(async (tx) => {
+      await tx.insert(blocks).values({ blockerId: req.userId!, blockedId: id }).onConflictDoNothing();
+      // blocking ends the friendship and drops pending requests both ways
+      await cutTies(tx, req.userId!, id);
+    });
     return reply.status(204).send();
   });
 

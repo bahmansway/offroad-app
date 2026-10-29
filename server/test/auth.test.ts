@@ -216,7 +216,7 @@ describe('rate limit', () => {
 
   it('default limits: login 10, register 20, refresh 60, create 30', () => {
     const c = loadConfig({ DATABASE_URL: 'postgres://x', JWT_SECRET: 'y'.repeat(40) });
-    expect(c.rateLimits).toEqual({ login: 10, loginPerIp: 100, register: 20, refresh: 60, create: 30, messages: 30 });
+    expect(c.rateLimits).toEqual({ login: 10, loginPerIp: 100, register: 20, refresh: 60, create: 30, messages: 30, friendRequests: 30 });
   });
 });
 

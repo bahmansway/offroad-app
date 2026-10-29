@@ -29,6 +29,13 @@
       "when": 1793268041430,
       "tag": "0003_v3_invite_decline",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793291541349,
+      "tag": "0004_v4_friends_groups",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,10 @@ import { profileRoutes } from './routes/profile.js';
 import { chatRoutes } from './routes/chat.js';
 import { clanRoutes } from './routes/clans.js';
 import { eventRoutes } from './routes/events.js';
+import { friendRoutes } from './routes/friends.js';
+import { groupRoutes } from './routes/groups.js';
+import { searchRoutes } from './routes/search.js';
+import { createLeaderboard, type Leaderboard } from './lib/leaderboard.js';
 import { createRealtime, type Realtime } from './lib/realtime.js';
 import { UPLOAD_CONTENT_TYPES } from './lib/images.js';
 
@@ -30,6 +34,8 @@ declare module 'fastify' {
     config: AppConfig;
     /** Socket.IO (live chat) on the same HTTP server. */
     realtime: Realtime;
+    /** Scoreboard with a 5-minute in-memory cache. */
+    leaderboard: Leaderboard;
     /** preHandler: requires a valid access token. */
     authenticate: (req: FastifyRequest) => Promise<void>;
   }
@@ -70,6 +76,7 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
   app.decorate('db', db);
   app.decorate('config', config);
   app.decorate('realtime', null as unknown as Realtime);
+  app.decorate('leaderboard', createLeaderboard(db));
   app.addHook('onClose', async () => {
     await pool.end();
   });
@@ -151,6 +158,9 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
       await api.register(chatRoutes);
       await api.register(clanRoutes);
       await api.register(eventRoutes);
+      await api.register(friendRoutes);
+      await api.register(groupRoutes);
+      await api.register(searchRoutes);
       api.setNotFoundHandler((_req, reply) => {
         reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
       });

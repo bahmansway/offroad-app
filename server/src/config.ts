@@ -12,6 +12,7 @@ export interface AppConfig {
     refresh: number; // per IP / 15 min
     create: number; // per user / hour, separately for: spots, cars, mods, clans; photo uploads (avatar, car, logo) share one counter
     messages: number; // per user / minute (chat)
+    friendRequests: number; // per user / hour
   };
   logger: boolean;
 }
@@ -58,6 +59,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       refresh: num(env.RATE_LIMIT_REFRESH, 60),
       create: num(env.RATE_LIMIT_CREATE, 30),
       messages: num(env.RATE_LIMIT_MESSAGES, 30),
+      friendRequests: num(env.RATE_LIMIT_FRIEND_REQUESTS, 30),
     },
     logger: env.NODE_ENV !== 'test',
   };

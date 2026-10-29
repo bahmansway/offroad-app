@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { clanMembers, clans, conversationMembers, conversations, events, messages, users } from '../db/schema.js';
 import type { Db } from '../db/index.js';
 import { badRequest, forbidden, idParam, notFound, parse } from '../lib/errors.js';
@@ -57,7 +57,7 @@ async function loadEvent(db: Db, conv: ConvRow) {
  * 404 if the conversation doesn't exist (or is an event chat past its 7-day read-only window),
  * 403 if the viewer is not a member.
  */
-async function requireMember(db: Db, conversationId: string, userId: string) {
+export async function requireMember(db: Db, conversationId: string, userId: string) {
   const [c] = await db.select().from(conversations).where(eq(conversations.id, conversationId)).limit(1);
   if (!c) throw notFound('Conversation not found');
   const ev = await loadEvent(db, c);
@@ -69,6 +69,7 @@ async function requireMember(db: Db, conversationId: string, userId: string) {
 /** Who may pin in a conversation: clan leader/officer, event organizer, either DM user. */
 async function canPin(db: Db, conv: ConvRow, ev: EventRow | null, userId: string) {
   if (conv.type === 'dm') return true;
+  if (conv.type === 'group') return conv.adminId === userId;
   if (conv.type === 'event') return !!ev && ev.organizerId === userId;
   if (conv.type === 'clan' && conv.clanId) {
     const [m] = await db
@@ -128,6 +129,9 @@ export async function conversationSummary(db: Db, conv: ConvRow, viewerId: strin
       readOnly = st.readOnly;
       readOnlyUntil = st.chatClosesAt ? st.chatClosesAt.toISOString() : null;
     }
+  } else if (conv.type === 'group') {
+    title = conv.name ?? '';
+    avatarUrl = imageUrl(conv.avatarImageId);
   } else {
     const [o] = await db
       .select(userRefCols)
@@ -181,12 +185,21 @@ export async function conversationSummary(db: Db, conv: ConvRow, viewerId: strin
     readOnlyUntil,
     pinned: await pinnedFor(db, conv, viewerId),
     canPin: readOnly ? false : await canPin(db, conv, ev ?? null, viewerId),
+    // v4 groups (adminId/isAdmin are null/false for other types)
+    adminId: conv.type === 'group' ? conv.adminId : null,
+    isAdmin: conv.type === 'group' && conv.adminId === viewerId,
+    memberCount: (
+      await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(conversationMembers)
+        .where(eq(conversationMembers.conversationId, conv.id))
+    )[0].n,
     updatedAt: conv.updatedAt.toISOString(),
   };
 }
 
 /** Conversations of a user, minus event chats past their read-only window. */
-const myConversations = (db: Db, userId: string) =>
+export const myConversations = (db: Db, userId: string) =>
   db
     .select({ c: conversations, mutedAt: conversationMembers.mutedAt })
     .from(conversationMembers)
@@ -214,28 +227,29 @@ export async function chatRoutes(app: FastifyInstance) {
   });
 
   // Total unread for the tab badge. Muted conversations are not counted.
-  app.get('/conversations/unread', { preHandler: app.authenticate }, async (req) => {
-    const me = req.userId!;
-    const [r] = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(messages)
-      .innerJoin(
-        conversationMembers,
-        and(eq(conversationMembers.conversationId, messages.conversationId), eq(conversationMembers.userId, me)),
+  app.get('/conversations/unread', { preHandler: app.authenticate }, async (req) => ({ total: await unreadTotal(db, req.userId!) }));
+
+  // Members of a conversation I'm in (admin first for groups, then by join time).
+  app.get('/conversations/:id/members', { preHandler: app.authenticate }, async (req) => {
+    const { conv } = await requireMember(db, idParam(req.params), req.userId!);
+    const rows = await db
+      .select({ ...userRefCols, joinedAt: conversationMembers.joinedAt })
+      .from(conversationMembers)
+      .innerJoin(users, eq(users.id, conversationMembers.userId))
+      .where(eq(conversationMembers.conversationId, conv.id))
+      .orderBy(
+        sql`case when ${conversationMembers.userId} = ${conv.adminId ?? null} then 0 else 1 end`,
+        asc(conversationMembers.joinedAt),
+        asc(conversationMembers.userId),
       )
-      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
-      .leftJoin(events, eq(events.id, conversations.eventId))
-      .where(
-        and(
-          isNull(conversationMembers.mutedAt),
-          visibleTo(me),
-          isNull(messages.deletedAt),
-          or(isNull(messages.senderId), ne(messages.senderId, me)),
-          gt(messages.createdAt, conversationMembers.lastReadAt),
-          or(ne(conversations.type, 'event'), sql`not (${chatClosedSql('events')})`),
-        ),
-      );
-    return { total: r.n };
+      .limit(500);
+    return {
+      items: rows.map((r) => ({
+        user: userRef(r),
+        isAdmin: conv.type === 'group' && conv.adminId === r.id,
+        joinedAt: r.joinedAt.toISOString(),
+      })),
+    };
   });
 
   app.get('/conversations/:id', { preHandler: app.authenticate }, async (req) => {
@@ -443,6 +457,30 @@ export async function chatRoutes(app: FastifyInstance) {
       .where(and(eq(conversationMembers.conversationId, id), eq(conversationMembers.userId, req.userId!)));
     return reply.status(204).send();
   });
+}
+
+/** Unread messages across my chats (muted, deleted, own and closed event chats excluded). */
+export async function unreadTotal(db: Db, me: string) {
+  const [r] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(messages)
+    .innerJoin(
+      conversationMembers,
+      and(eq(conversationMembers.conversationId, messages.conversationId), eq(conversationMembers.userId, me)),
+    )
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .leftJoin(events, eq(events.id, conversations.eventId))
+    .where(
+      and(
+        isNull(conversationMembers.mutedAt),
+        visibleTo(me),
+        isNull(messages.deletedAt),
+        or(isNull(messages.senderId), ne(messages.senderId, me)),
+        gt(messages.createdAt, conversationMembers.lastReadAt),
+        or(ne(conversations.type, 'event'), sql`not (${chatClosedSql('events')})`),
+      ),
+    );
+  return r.n;
 }
 
 /** Membership helpers used by clan and event routes (keep sockets in sync). Call after the DB change commits. */

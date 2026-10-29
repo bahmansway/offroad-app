@@ -89,6 +89,8 @@ export const spotRatings = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     stars: smallint('stars').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /** v4: when the rating was first given (leaderboard points). Re-rating keeps it. */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.spotId, t.userId] }), check('spot_ratings_stars_check', sql`${t.stars} between 1 and 5`)],
 );
@@ -133,6 +135,8 @@ export const carRatings = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     stars: smallint('stars').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /** v4: when the rating was first given (leaderboard points). Re-rating keeps it. */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.carId, t.userId] }), check('car_ratings_stars_check', sql`${t.stars} between 1 and 5`)],
 );
@@ -196,7 +200,7 @@ export const images = pgTable(
     ownerId: uuid('owner_id')
       .notNull()
       .references((): AnyPgColumn => users.id, { onDelete: 'cascade' }),
-    kind: text('kind', { enum: ['avatar', 'car', 'clan', 'event'] }).notNull(),
+    kind: text('kind', { enum: ['avatar', 'car', 'clan', 'event', 'group'] }).notNull(),
     mime: text('mime').notNull().default('image/jpeg'),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
@@ -267,7 +271,11 @@ export const conversations = pgTable(
   'conversations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    type: text('type', { enum: ['dm', 'clan', 'event'] }).notNull(),
+    type: text('type', { enum: ['dm', 'clan', 'event', 'group'] }).notNull(),
+    /** v4 group chats: name, photo and admin (null for other types). */
+    name: text('name'),
+    avatarImageId: uuid('avatar_image_id').references((): AnyPgColumn => images.id, { onDelete: 'set null' }),
+    adminId: uuid('admin_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
     clanId: uuid('clan_id').references(() => clans.id, { onDelete: 'cascade' }),
     eventId: uuid('event_id').references((): AnyPgColumn => events.id, { onDelete: 'cascade' }),
     pinnedMessageId: uuid('pinned_message_id').references((): AnyPgColumn => messages.id, { onDelete: 'set null' }),
@@ -284,7 +292,7 @@ export const conversations = pgTable(
     uniqueIndex('conversations_event_idx').on(t.eventId),
     check(
       'conversations_type_check',
-      sql`(${t.type} = 'dm' and ${t.dmKey} is not null and ${t.clanId} is null and ${t.eventId} is null) or (${t.type} = 'clan' and ${t.clanId} is not null and ${t.dmKey} is null and ${t.eventId} is null) or (${t.type} = 'event' and ${t.eventId} is not null and ${t.dmKey} is null and ${t.clanId} is null)`,
+      sql`(${t.type} = 'dm' and ${t.dmKey} is not null and ${t.clanId} is null and ${t.eventId} is null) or (${t.type} = 'clan' and ${t.clanId} is not null and ${t.dmKey} is null and ${t.eventId} is null) or (${t.type} = 'event' and ${t.eventId} is not null and ${t.dmKey} is null and ${t.clanId} is null) or (${t.type} = 'group' and ${t.name} is not null and ${t.dmKey} is null and ${t.clanId} is null and ${t.eventId} is null)`,
     ),
   ],
 );
@@ -437,5 +445,51 @@ export const eventParticipants = pgTable(
     index('event_participants_event_status_idx').on(t.eventId, t.status, t.joinedAt),
     check('event_participants_status_check', sql`${t.status} in ('going','waitlist','removed')`),
     check('event_participants_seats_check', sql`${t.seats} between 0 and 6`),
+  ],
+);
+
+
+// ---------------- v4: friends ----------------
+
+/**
+ * Friend requests. Pending = declinedAt null. A declined row is kept 24 h so the sender can't re-request
+ * right away. Accept / cancel delete the row.
+ */
+export const friendRequests = pgTable(
+  'friend_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    fromId: uuid('from_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    toId: uuid('to_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    declinedAt: timestamp('declined_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('friend_requests_pair_idx').on(t.fromId, t.toId),
+    index('friend_requests_to_idx').on(t.toId),
+    check('friend_requests_not_self', sql`${t.fromId} <> ${t.toId}`),
+  ],
+);
+
+/** Friendships: two rows per pair (A->B and B->A), so "my friends" is a simple lookup. */
+export const friendships = pgTable(
+  'friendships',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    friendId: uuid('friend_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.friendId] }),
+    index('friendships_friend_idx').on(t.friendId),
+    check('friendships_not_self', sql`${t.userId} <> ${t.friendId}`),
   ],
 );

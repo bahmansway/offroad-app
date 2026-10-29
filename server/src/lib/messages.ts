@@ -36,6 +36,12 @@ export const SYSTEM_KEYS = [
   'event.removed',
   'event.cancelled',
   'event.edited',
+  'group.created',
+  'group.added',
+  'group.removed',
+  'group.left',
+  'group.renamed',
+  'group.admin',
 ] as const;
 export type SystemKey = (typeof SYSTEM_KEYS)[number];
 
@@ -48,6 +54,12 @@ const fallback: Record<SystemKey, (p: Record<string, any>) => string> = {
   'event.removed': (p) => `${name(p)} was removed by the organizer`,
   'event.cancelled': (p) => (p.reason ? `The event was cancelled: ${p.reason}` : 'The event was cancelled'),
   'event.edited': () => 'The organizer updated the event details',
+  'group.created': (p) => `${String(p.byDisplayName ?? 'Someone')} created the group "${p.name}"`,
+  'group.added': (p) => `${String(p.byDisplayName ?? 'Someone')} added ${name(p)}`,
+  'group.removed': (p) => `${String(p.byDisplayName ?? 'Someone')} removed ${name(p)}`,
+  'group.left': (p) => `${name(p)} left the group`,
+  'group.renamed': (p) => `${String(p.byDisplayName ?? 'Someone')} renamed the group to "${p.name}"`,
+  'group.admin': (p) => `${name(p)} is now the group admin`,
 };
 
 /** Insert a system message (inside a transaction). Call `broadcastMessage` after commit. */

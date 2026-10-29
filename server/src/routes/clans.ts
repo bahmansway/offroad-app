@@ -21,6 +21,24 @@ export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const REINVITE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const isStaff = (r: Role) => r === 'leader' || r === 'officer';
 
+/** Members who joined this recently show as "Rookie" (Yeni sürücü). */
+export const ROOKIE_DAYS = 30;
+export type ClanTitle = 'leader' | 'navigator' | 'driver' | 'rookie';
+/** Display title from the internal role (permissions still use the role). */
+export function clanTitle(role: MemberRole, joinedAt: Date, now = Date.now()): ClanTitle {
+  if (role === 'leader') return 'leader';
+  if (role === 'officer') return 'navigator';
+  return now - joinedAt.getTime() < ROOKIE_DAYS * 24 * 60 * 60 * 1000 ? 'rookie' : 'driver';
+}
+const TITLE_ORDER: Record<ClanTitle, number> = { leader: 0, navigator: 1, driver: 2, rookie: 3 };
+
+type Ranks = Map<string, { rank: number; points: number }>;
+/** Sum of the members' points this Baku month. */
+async function clanMonthPoints(db: Db, clanId: string, ranks: Ranks) {
+  const rows = await db.select({ id: clanMembers.userId }).from(clanMembers).where(eq(clanMembers.clanId, clanId));
+  return rows.reduce((sum, r) => sum + (ranks.get(r.id)?.points ?? 0), 0);
+}
+
 const name = z.string().trim().min(3).max(40);
 const tag = z
   .string()
@@ -90,7 +108,7 @@ async function clanConversationId(db: Db, clanId: string) {
 
 const memberCountSql = sql<number>`(select count(*)::int from ${clanMembers} m where m.clan_id = ${clans.id})`;
 
-async function toClan(db: Db, c: ClanRow, viewerId: string | null, memberCount?: number) {
+async function toClan(db: Db, c: ClanRow, viewerId: string | null, memberCount: number | undefined, ranks: Ranks) {
   const [leader] = await db.select(userRefCols).from(users).where(eq(users.id, c.leaderId));
   if (memberCount === undefined) {
     const [n] = await db.select({ n: sql<number>`count(*)::int` }).from(clanMembers).where(eq(clanMembers.clanId, c.id));
@@ -110,12 +128,14 @@ async function toClan(db: Db, c: ClanRow, viewerId: string | null, memberCount?:
     myRole: role,
     // only members get the chat id
     conversationId: role && role !== 'pending' ? await clanConversationId(db, c.id) : null,
+    monthPoints: await clanMonthPoints(db, c.id, ranks),
     createdAt: c.createdAt.toISOString(),
   };
 }
 
 export async function clanRoutes(app: FastifyInstance) {
   const db = app.db;
+  const ranks = async () => (await app.leaderboard.get('month')).ranks;
   const createLimit = makeLimiter(app, { max: app.config.rateLimits.create, timeWindow: '1 hour', key: (req) => `clan:${req.userId}` });
   const joinLimit = makeLimiter(app, { max: 30, timeWindow: '1 hour', key: (req) => `clanjoin:${req.userId}` });
   const inviteLimit = makeLimiter(app, { max: 60, timeWindow: '1 hour', key: (req) => `claninvite:${req.userId}` });
@@ -218,7 +238,8 @@ export async function clanRoutes(app: FastifyInstance) {
       .where(like ? or(ilike(clans.name, like), ilike(clans.tag, like)) : undefined)
       .orderBy(desc(memberCountSql), asc(clans.name))
       .limit(50);
-    return { items: await Promise.all(rows.map((r) => toClan(db, r.c, req.userId, r.n))) };
+    const rk = await ranks();
+    return { items: await Promise.all(rows.map((r) => toClan(db, r.c, req.userId, r.n, rk))) };
   });
 
   app.post('/clans', { preHandler: [app.authenticate, createLimit] }, async (req, reply) => {
@@ -241,10 +262,10 @@ export async function clanRoutes(app: FastifyInstance) {
       throw nameTakenError(err) ?? err;
     }
     await addConversationMember(app, db, convId, me);
-    return reply.status(201).send(await toClan(db, clan, me, 1));
+    return reply.status(201).send(await toClan(db, clan, me, 1, await ranks()));
   });
 
-  app.get('/clans/:id', async (req) => toClan(db, await loadClan(idParam(req.params)), req.userId));
+  app.get('/clans/:id', async (req) => toClan(db, await loadClan(idParam(req.params)), req.userId, undefined, await ranks()));
 
   app.patch('/clans/:id', { preHandler: app.authenticate }, async (req) => {
     const id = idParam(req.params);
@@ -259,7 +280,7 @@ export async function clanRoutes(app: FastifyInstance) {
         throw nameTakenError(err) ?? err;
       }
     }
-    return toClan(db, await loadClan(id), req.userId);
+    return toClan(db, await loadClan(id), req.userId, undefined, await ranks());
   });
 
   app.delete('/clans/:id', { preHandler: app.authenticate }, async (req, reply) => {
@@ -304,7 +325,7 @@ export async function clanRoutes(app: FastifyInstance) {
       await lockClan(id, (tx) => insertMember(tx, id, me));
       await joinChat(id, me);
     } else await db.insert(clanRequests).values({ clanId: id, userId: me }).onConflictDoNothing();
-    return toClan(db, c, me);
+    return toClan(db, c, me, undefined, await ranks());
   });
 
   // Members leave; a pending request is cancelled. The leader must hand over (or delete the clan) first.
@@ -325,9 +346,10 @@ export async function clanRoutes(app: FastifyInstance) {
     } else if (role === 'pending') {
       await db.delete(clanRequests).where(and(eq(clanRequests.clanId, id), eq(clanRequests.userId, me)));
     } else throw notFound('You are not in this clan');
-    return toClan(db, c, me);
+    return toClan(db, c, me, undefined, await ranks());
   });
 
+  // Sorted by title (leader, navigator, driver, rookie), then points this month, then join time.
   app.get('/clans/:id/members', async (req) => {
     const id = idParam(req.params);
     await loadClan(id);
@@ -336,9 +358,19 @@ export async function clanRoutes(app: FastifyInstance) {
       .from(clanMembers)
       .innerJoin(users, eq(users.id, clanMembers.userId))
       .where(eq(clanMembers.clanId, id))
-      .orderBy(sql`case ${clanMembers.role} when 'leader' then 0 when 'officer' then 1 else 2 end`, asc(clanMembers.joinedAt))
+      .orderBy(asc(clanMembers.joinedAt), asc(clanMembers.userId))
       .limit(1000);
-    return { items: rows.map((r) => ({ user: userRef(r), role: r.role, joinedAt: r.joinedAt.toISOString() })) };
+    const r = await ranks();
+    const now = Date.now();
+    const items = rows.map((m) => ({
+      user: userRef(m),
+      role: m.role,
+      title: clanTitle(m.role, m.joinedAt, now),
+      joinedAt: m.joinedAt.toISOString(),
+      monthPoints: r.get(m.id)?.points ?? 0,
+    }));
+    items.sort((a, b) => TITLE_ORDER[a.title] - TITLE_ORDER[b.title] || b.monthPoints - a.monthPoints);
+    return { items };
   });
 
   const requireStaff = async (clanId: string, userId: string) => {
@@ -447,7 +479,7 @@ export async function clanRoutes(app: FastifyInstance) {
         .returning({ id: clans.id });
       if (demoted.length !== 1 || moved.length !== 1) throw conflict('Leadership changed meanwhile, try again');
     });
-    return toClan(db, await loadClan(id), req.userId);
+    return toClan(db, await loadClan(id), req.userId, undefined, await ranks());
   });
 
   // ---- officers (leader only) ----
@@ -606,7 +638,7 @@ export async function clanRoutes(app: FastifyInstance) {
       await insertMember(tx, inv.clanId, me); // full / already in a clan -> 409 (invite kept)
     });
     await joinChat(inv.clanId, me);
-    return toClan(db, await loadClan(inv.clanId), me);
+    return toClan(db, await loadClan(inv.clanId), me, undefined, await ranks());
   });
 
   app.post('/clan-invites/:id/decline', { preHandler: app.authenticate }, async (req, reply) => {
