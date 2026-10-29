@@ -54,7 +54,7 @@ afterAll(async () => {
 describe('group chats (acceptance check 3)', () => {
   let admin: U, b: U, c: U, d: U, stranger: U;
   let gid: string;
-  const inbox: Record<string, any[]> = { b: [], c: [], d: [], cRemoved: [], bUpdated: [] };
+  const inbox: Record<string, any[]> = { b: [], c: [], d: [], cRemoved: [], bUpdated: [], cAll: [] };
 
   beforeAll(async () => {
     admin = await register(app, 'Admin');
@@ -71,6 +71,7 @@ describe('group chats (acceptance check 3)', () => {
     sc.on('message:new', (m) => inbox.c.push(m));
     sd.on('message:new', (m) => inbox.d.push(m));
     sc.on('group:removed', (p) => inbox.cRemoved.push(p));
+    sc.onAny((event) => inbox.cAll.push(event));
     sb.on('group:updated', (p) => inbox.bUpdated.push(p));
   });
 
@@ -213,6 +214,8 @@ describe('group chats (acceptance check 3)', () => {
     await until(() => inbox.b.some((m) => m.text === 'after removal'));
     await wait(100);
     expect(inbox.c.length).toBe(before);
+    // nothing at all reaches C after group:removed (no group:updated, no system message)
+    expect(inbox.cAll.slice(inbox.cAll.lastIndexOf('group:removed') + 1)).toEqual([]);
     expect((await systemKeys(b, gid)).slice(-1)).toEqual(['group.removed']);
     expect((await req('GET', '/api/conversations', c)).json().map((x: any) => x.id)).not.toContain(gid);
   });

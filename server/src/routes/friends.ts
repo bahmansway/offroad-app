@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, desc, eq, ilike, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, isNull, sql } from 'drizzle-orm';
 import { clanInvites, friendRequests, friendships, users } from '../db/schema.js';
 import type { Db, Tx } from '../db/index.js';
 import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
@@ -15,6 +15,7 @@ import {
   incomingRequestCount,
   likePattern,
   notBlockedSql,
+  lockPair,
 } from '../lib/friends.js';
 import { unreadTotal } from './chat.js';
 
@@ -31,17 +32,6 @@ async function refOf(db: Db | Tx, id: string) {
 
 async function toRequest(db: Db | Tx, r: ReqRow) {
   return { id: r.id, from: await refOf(db, r.fromId), to: await refOf(db, r.toId), createdAt: r.createdAt.toISOString() };
-}
-
-/** Lock both users' rows (in id order, no deadlock): one friend change per pair at a time, caps can't be raced. */
-async function lockPair(tx: Tx, a: string, b: string) {
-  const rows = await tx
-    .select({ id: users.id })
-    .from(users)
-    .where(inArray(users.id, [a, b]))
-    .orderBy(asc(users.id))
-    .for('update');
-  if (rows.length !== 2) throw notFound('User not found');
 }
 
 async function makeFriends(tx: Tx, a: string, b: string) {
@@ -81,6 +71,8 @@ export async function friendRoutes(app: FastifyInstance) {
     if (await eitherBlocked(db, me, userId)) throw forbidden('You cannot send a friend request to this user');
     const result = await db.transaction(async (tx) => {
       await lockPair(tx, me, userId);
+      // re-check under the lock: a block may have landed after the first check
+      if (await eitherBlocked(tx, me, userId)) throw forbidden('You cannot send a friend request to this user');
       if (await areFriends(tx, me, userId)) throw conflict('You are already friends');
       const [incoming] = await tx
         .select()
@@ -167,7 +159,8 @@ export async function friendRoutes(app: FastifyInstance) {
     if (await eitherBlocked(db, me, r0.fromId)) throw forbidden('You cannot accept this request');
     await db.transaction(async (tx) => {
       await lockPair(tx, me, r0.fromId);
-      const r = await incoming(tx, id, me); // cancelled meanwhile -> 404
+      const r = await incoming(tx, id, me); // cancelled (or removed by a block) meanwhile -> 404
+      if (await eitherBlocked(tx, me, r.fromId)) throw forbidden('You cannot accept this request');
       await makeFriends(tx, me, r.fromId);
       await tx.delete(friendRequests).where(eq(friendRequests.id, id));
       // a crossing request of mine (if any) is no longer needed

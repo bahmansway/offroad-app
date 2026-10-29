@@ -36,6 +36,13 @@
       "when": 1793291541349,
       "tag": "0004_v4_friends_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793292509206,
+      "tag": "0005_v4_leaderboard_indexes",
+      "breakpoints": true
     }
   ]
 }

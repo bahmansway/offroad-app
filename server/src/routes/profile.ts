@@ -9,7 +9,7 @@ import { makeLimiter } from '../lib/limits.js';
 import { isForeignKeyViolation, privateUser, userRef, userRefCols } from '../lib/users.js';
 import { loadCarSummaries } from './cars.js';
 import { clanTitle } from './clans.js';
-import { cutTies, friendFields } from '../lib/friends.js';
+import { cutTies, friendFields, lockPair } from '../lib/friends.js';
 
 const optText = (max: number) =>
   z
@@ -175,6 +175,8 @@ export async function profileRoutes(app: FastifyInstance) {
     const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
     if (!u) throw notFound('User not found');
     await db.transaction(async (tx) => {
+      // same lock as friend requests / accepts, so a block can't interleave with them
+      await lockPair(tx, req.userId!, id);
       await tx.insert(blocks).values({ blockerId: req.userId!, blockedId: id }).onConflictDoNothing();
       // blocking ends the friendship and drops pending requests both ways
       await cutTies(tx, req.userId!, id);

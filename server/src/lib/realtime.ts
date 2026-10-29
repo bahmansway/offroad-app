@@ -64,11 +64,20 @@ export function createRealtime(app: FastifyInstance): Realtime {
       socket.on('disconnect', () => clearTimeout(timer));
     }
     try {
-      const rows = await app.db
-        .select({ id: conversationMembers.conversationId })
-        .from(conversationMembers)
-        .where(eq(conversationMembers.userId, userId));
-      socket.join([userRoom(userId), ...rows.map((r) => convRoom(r.id))]);
+      const load = async () =>
+        (
+          await app.db
+            .select({ id: conversationMembers.conversationId })
+            .from(conversationMembers)
+            .where(eq(conversationMembers.userId, userId))
+        ).map((r) => convRoom(r.id));
+      const first = await load();
+      socket.join([userRoom(userId), ...first]);
+      // Membership may have changed between the query and the join (a removal or add sent to the user
+      // room before this socket was in it). Check again now that the socket gets live updates.
+      const now = new Set(await load());
+      for (const room of first) if (!now.has(room)) socket.leave(room);
+      for (const room of now) if (!socket.rooms.has(room)) socket.join(room);
       socket.emit('ready', { userId });
     } catch (err) {
       app.log.error({ err }, 'socket join failed');

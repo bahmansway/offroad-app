@@ -6,16 +6,23 @@ import { DEFAULT_EVENT_LENGTH_MS } from './eventState.js';
 
 /**
  * Scoreboard points, worked out from existing tables (no ledger). Months are Baku calendar months
- * (UTC+4, no daylight saving).
- * - spot shared: 10 (spot row still exists)
- * - event organized, finished, not cancelled, >= 2 cars going: 15 (counted when the event ends)
- * - event attended (going when it finished, not the organizer): 5 (counted when the event ends)
+ * (UTC+4, no daylight saving). Anti-farming caps are per Baku month; all-time is the sum of the months.
+ * - spot shared: 10, once it is >= 24 h old and has no reports; max 10 spots a month (counted at creation)
+ * - event organized: 15, max 4 a month; attended (going when it finished, not the organizer): 5, max 8 a month.
+ *   Only events that finished, were not cancelled, lasted >= 1 h (endsAt, or the 24 h default) and had
+ *   >= 2 cars going. Counted when the event ends.
  * - car with a photo: 5, only the user's first 2 such cars (by creation time)
- * - rating given (spot or car, not on your own spot): 1, max 20 per Baku month
+ * - rating given (spot or car, not on your own spot): 1, max 20 a month
  */
 export const POINTS = { spot: 10, organized: 15, attended: 5, car: 5, rating: 1 } as const;
 export const MAX_CARS_COUNTED = 2;
-export const MAX_RATINGS_PER_MONTH = 20;
+/** Most items of each kind counted per Baku month (all-time = sum of the monthly caps). */
+export const MONTHLY_CAPS = { spots: 10, events: 4, attended: 8, ratings: 20 } as const;
+/** A spot counts only once it is this old and nobody has reported it. */
+export const SPOT_MIN_AGE_HOURS = 24;
+/** Events earn points only if they lasted at least this long and had this many cars going. */
+export const MIN_EVENT_MINUTES = 60;
+export const MIN_CARS_GOING = 2;
 export const LEADERBOARD_SIZE = 20;
 export const LEADERBOARD_CACHE_MS = 5 * 60 * 1000;
 const BAKU_OFFSET_MS = 4 * 60 * 60 * 1000;
@@ -61,21 +68,52 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
       select e.id, e.organizer_id, ${end} as at
       from events e
       where e.status = 'scheduled' and ${inRange(end)}
+        and ${end} - e.starts_at >= interval '${sql.raw(String(MIN_EVENT_MINUTES))} minutes'
+        and (select count(*) from event_participants p where p.event_id = e.id and p.status = 'going') >= ${sql.raw(String(MIN_CARS_GOING))}
     ),
-    act as (
-      select s.owner_id as user_id, 'spots' as kind, ${POINTS.spot}::int as pts, s.created_at as at
+    raw as (
+      select s.owner_id as user_id, 'spots' as kind, ${POINTS.spot}::int as pts, s.created_at as at, s.id::text as k
       from spots s
       where ${inRange(sql.raw('s.created_at'))}
+        and s.created_at <= ${nowIso}::timestamptz - interval '${sql.raw(String(SPOT_MIN_AGE_HOURS))} hours'
+        and not exists (select 1 from reports r where r.target_type = 'spot' and r.target_id = s.id)
       union all
-      select f.organizer_id, 'events', ${POINTS.organized}::int, f.at
+      select f.organizer_id, 'events', ${POINTS.organized}::int, f.at, f.id::text
       from finished f
-      where (select count(*) from event_participants p where p.event_id = f.id and p.status = 'going') >= 2
       union all
-      select p.user_id, 'attended', ${POINTS.attended}::int, f.at
+      select p.user_id, 'attended', ${POINTS.attended}::int, f.at, f.id::text
       from finished f
       join event_participants p on p.event_id = f.id
       where p.status = 'going' and p.user_id <> f.organizer_id
       union all
+      select r.user_id, 'ratings', ${POINTS.rating}::int, r.at, r.k
+      from (
+        select sr.user_id, sr.created_at as at, 's' || sr.spot_id::text as k
+        from spot_ratings sr join spots s on s.id = sr.spot_id
+        where s.owner_id <> sr.user_id
+        union all
+        select cr.user_id, cr.created_at, 'c' || cr.car_id::text from car_ratings cr
+      ) r
+      where ${inRange(sql.raw('r.at'))}
+    ),
+    capped as (
+      -- monthly caps per kind (Baku months); the range filter above is month-aligned, so filtering first is safe
+      select raw.*,
+        row_number() over (
+          partition by raw.user_id, raw.kind, date_trunc('month', (raw.at at time zone 'UTC') + interval '4 hours')
+          order by raw.at, raw.k
+        ) as rn
+      from raw
+    ),
+    act as (
+      select user_id, kind, pts, at from capped
+      where rn <= case kind
+        when 'spots' then ${sql.raw(String(MONTHLY_CAPS.spots))}
+        when 'events' then ${sql.raw(String(MONTHLY_CAPS.events))}
+        when 'attended' then ${sql.raw(String(MONTHLY_CAPS.attended))}
+        else ${sql.raw(String(MONTHLY_CAPS.ratings))} end
+      union all
+      -- cars: the user's first 2 photo cars ever (not a monthly cap), so rank before the range filter
       select x.owner_id, 'cars', ${POINTS.car}::int, x.created_at
       from (
         select c.owner_id, c.created_at,
@@ -83,24 +121,7 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
         from cars c
         where c.photo_image_id is not null
       ) x
-      where x.rn <= ${MAX_CARS_COUNTED} and ${inRange(sql.raw('x.created_at'))}
-      union all
-      select y.user_id, 'ratings', ${POINTS.rating}::int, y.at
-      from (
-        select r.user_id, r.at,
-          row_number() over (
-            partition by r.user_id, date_trunc('month', (r.at at time zone 'UTC') + interval '4 hours')
-            order by r.at, r.k
-          ) as rn
-        from (
-          select sr.user_id, sr.created_at as at, sr.spot_id::text as k
-          from spot_ratings sr join spots s on s.id = sr.spot_id
-          where s.owner_id <> sr.user_id
-          union all
-          select cr.user_id, cr.created_at, cr.car_id::text from car_ratings cr
-        ) r
-      ) y
-      where y.rn <= ${MAX_RATINGS_PER_MONTH} and ${inRange(sql.raw('y.at'))}
+      where x.rn <= ${sql.raw(String(MAX_CARS_COUNTED))} and ${inRange(sql.raw('x.created_at'))}
     )
     select a.user_id,
       sum(a.pts)::int as points,

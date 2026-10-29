@@ -35,7 +35,7 @@ describe('Baku month boundaries (UTC+4)', () => {
 describe('leaderboard points (seeded scenario, fixed "now")', () => {
   const NOW = new Date('2026-11-15T12:00:00Z');
   const U: Record<string, string> = {};
-  const names = ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8'];
+  const names = ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8', 'u9', 'u10', 'u11'];
   const q = (text: string, params: unknown[] = []) => sql.query(text, params);
 
   beforeAll(async () => {
@@ -116,6 +116,26 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
     // U6 and U7: one November spot each, U7's earlier (tie rule)
     await spot(U.u6, '2026-11-05T10:00:00Z');
     await spot(U.u7, '2026-11-03T10:00:00Z');
+
+    // anti-farming
+    // U8: a spot younger than 24 h at "now", and a reported spot -> nothing
+    await spot(U.u8, '2026-11-15T00:00:00Z');
+    const reported = await spot(U.u8, '2026-11-03T10:00:00Z');
+    await q(`insert into reports (reporter_id, target_type, target_id, reason) values ($1, 'spot', $2, 'fake')`, [U.u1, reported]);
+    // U9: 12 spots in November (max 10 count) + 3 in October
+    for (let i = 0; i < 12; i++) await spot(U.u9, `2026-11-02T${String(10 + i).padStart(2, '0')}:00:00Z`);
+    for (let i = 0; i < 3; i++) await spot(U.u9, '2026-10-05T10:00:00Z');
+    // U10 organizes a 30-minute event (too short: no points, and it doesn't use up a cap slot),
+    // then 9 two-hour events, all with U11 going: U10 max 4 organized, U11 max 8 attended
+    const short = await event(U.u10, '2026-11-05T08:00:00Z', '2026-11-05T08:30:00Z');
+    await part(short, U.u10);
+    await part(short, U.u11);
+    for (let i = 0; i < 9; i++) {
+      const day = String(6 + i).padStart(2, '0');
+      const ev = await event(U.u10, `2026-11-${day}T08:00:00Z`, `2026-11-${day}T10:00:00Z`);
+      await part(ev, U.u10);
+      await part(ev, U.u11);
+    }
   });
 
   const view = (rows: Awaited<ReturnType<typeof computeRanking>>) =>
@@ -124,6 +144,9 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
   it('this month (Baku): exact points, ties by earlier first activity', async () => {
     const rows = await computeRanking(app.db, 'month', NOW);
     expect(view(rows)).toEqual([
+      ['u9', 100],
+      ['u10', 60],
+      ['u11', 40],
       ['u4', 35],
       ['u3', 15],
       ['u2', 15],
@@ -138,13 +161,20 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
     expect(by[U.u2]).toEqual({ spots: 0, events: 15, attended: 0, cars: 0, ratings: 0 });
     expect(by[U.u1]).toEqual({ spots: 10, events: 0, attended: 0, cars: 0, ratings: 0 });
     expect(by[U.u5]).toEqual({ spots: 0, events: 0, attended: 5, cars: 0, ratings: 0 });
+    expect(by[U.u9]).toEqual({ spots: 100, events: 0, attended: 0, cars: 0, ratings: 0 });
+    expect(by[U.u10]).toEqual({ spots: 0, events: 60, attended: 0, cars: 0, ratings: 0 });
+    expect(by[U.u11]).toEqual({ spots: 0, events: 0, attended: 40, cars: 0, ratings: 0 });
+    expect(by[U.u8]).toBeUndefined();
   });
 
   it('all time', async () => {
     const rows = await computeRanking(app.db, 'all', NOW);
     expect(view(rows)).toEqual([
-      ['u5', 305],
+      ['u9', 130],
+      ['u5', 105], // 30 spots in one month: only 10 count
+      ['u10', 60],
       ['u4', 45],
+      ['u11', 40],
       ['u6', 25],
       ['u1', 20],
       ['u7', 15],
@@ -155,11 +185,17 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
     expect(u4.breakdown).toEqual({ spots: 0, events: 15, attended: 0, cars: 5, ratings: 25 });
   });
 
+  it('the young spot counts once it is 24 h old', async () => {
+    const rows = await computeRanking(app.db, 'all', new Date('2026-11-16T00:00:01Z'));
+    expect(rows.find((r) => r.userId === U.u8)?.points).toBe(10);
+  });
+
   it('a month earlier the November activity does not count yet', async () => {
     const rows = await computeRanking(app.db, 'month', new Date('2026-10-31T19:45:00Z'));
+    // U1's 19:30 spot is only 15 minutes old at this moment: not counted yet
     expect(view(rows)).toEqual([
+      ['u9', 30],
       ['u6', 15],
-      ['u1', 10],
       ['u4', 5],
       ['u7', 5],
     ]);
@@ -168,12 +204,12 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
   it('board shape: top 20 with user summary, rank map', async () => {
     const b = await buildBoard(app.db, 'month', NOW);
     expect(b.monthStart).toBe('2026-10-31T20:00:00.000Z');
-    expect(b.items[0]).toMatchObject({
-      rank: 1,
+    expect(b.items[3]).toMatchObject({
+      rank: 4,
       points: 35,
       user: { id: U.u4, displayName: 'U4', avatarUrl: null, currentCar: null, clan: null },
     });
-    expect(b.ranks.get(U.u5)).toEqual({ rank: 7, points: 5 });
+    expect(b.ranks.get(U.u5)).toEqual({ rank: 10, points: 5 });
     expect(b.ranks.get(U.u8)).toBeUndefined();
   });
 
@@ -199,26 +235,32 @@ describe('GET /api/leaderboard (acceptance check 5)', () => {
   });
 
   it('points from real actions, my rank, 5-minute cache, blocked flag', async () => {
+    const h = await register(app, 'Host');
+    const spot = (await req('POST', '/api/spots', h, { type: 'camp', name: 'Host camp', lat: 40.5, lng: 49.9 })).json();
     app.leaderboard.clear();
+    // a brand-new spot earns nothing yet (24 h rule)
     await req('POST', '/api/spots', a, { type: 'camp', name: 'Camp A', lat: 40.5, lng: 49.9 });
+    expect((await req('GET', '/api/leaderboard', a)).json().items).toEqual([]);
+    app.leaderboard.clear();
+    await req('PUT', `/api/spots/${spot.id}/rating`, a, { stars: 5 });
     let r = (await req('GET', '/api/leaderboard', a)).json();
     expect(r.items).toHaveLength(1);
-    expect(r.items[0]).toMatchObject({ rank: 1, points: 10, user: { id: a.user.id }, breakdown: { spots: 10 }, blocked: false });
-    expect(r.me).toEqual({ rank: 1, points: 10 });
-    // cached: B's new spot doesn't show until the cache expires
-    await req('POST', '/api/spots', b, { type: 'camp', name: 'Camp B', lat: 40.6, lng: 49.9 });
+    expect(r.items[0]).toMatchObject({ rank: 1, points: 1, user: { id: a.user.id }, breakdown: { ratings: 1, spots: 0 }, blocked: false });
+    expect(r.me).toEqual({ rank: 1, points: 1 });
+    // cached: B's rating doesn't show until the cache expires
+    await req('PUT', `/api/spots/${spot.id}/rating`, b, { stars: 4 });
     expect((await req('GET', '/api/leaderboard', b)).json().items).toHaveLength(1);
     app.leaderboard.clear();
     r = (await req('GET', '/api/leaderboard', b)).json();
     expect(r.items.map((i: any) => i.user.id)).toEqual([a.user.id, b.user.id]); // tie: A was first
-    expect(r.me).toEqual({ rank: 2, points: 10 });
+    expect(r.me).toEqual({ rank: 2, points: 1 });
     // public board: blocked users still listed, flagged for the viewer
     await req('POST', `/api/users/${a.user.id}/block`, b);
     expect((await req('GET', '/api/leaderboard', b)).json().items[0]).toMatchObject({ user: { id: a.user.id }, blocked: true });
     expect((await req('GET', '/api/leaderboard', a)).json().items[1]).toMatchObject({ user: { id: b.user.id }, blocked: true });
     const all = (await req('GET', '/api/leaderboard?period=all', a)).json();
     expect(all.period).toBe('all');
-    expect(all.me).toEqual({ rank: 1, points: 10 });
+    expect(all.me).toEqual({ rank: 1, points: 1 });
   });
 });
 
@@ -233,23 +275,53 @@ describe('clan driver titles + monthly points (acceptance check 4)', () => {
     await req('POST', `/api/clans/${clan.id}/members/${nav.user.id}/role`, leader, { role: 'officer' });
     await sql.query(`update clan_members set joined_at = now() - interval '31 days' where user_id = $1`, [vet.user.id]);
     await sql.query(`update clan_members set joined_at = now() - interval '29 days' where user_id = $1`, [rookie.user.id]);
-    // points this month: rookie 20, vet 0, leader 10
-    await req('POST', '/api/spots', rookie, { type: 'camp', name: 'R1', lat: 40.1, lng: 49.1 });
-    await req('POST', '/api/spots', rookie, { type: 'camp', name: 'R2', lat: 40.2, lng: 49.2 });
-    await req('POST', '/api/spots', leader, { type: 'camp', name: 'L1', lat: 40.3, lng: 49.3 });
+    // points this month (ratings count right away): rookie 2, vet 0, leader 1
+    const s1 = (await req('POST', '/api/spots', vet, { type: 'camp', name: 'V1', lat: 40.1, lng: 49.1 })).json();
+    const s2 = (await req('POST', '/api/spots', vet, { type: 'camp', name: 'V2', lat: 40.2, lng: 49.2 })).json();
+    await req('PUT', `/api/spots/${s1.id}/rating`, rookie, { stars: 5 });
+    await req('PUT', `/api/spots/${s2.id}/rating`, rookie, { stars: 5 });
+    await req('PUT', `/api/spots/${s1.id}/rating`, leader, { stars: 3 });
     app.leaderboard.clear();
     const m = (await req('GET', `/api/clans/${clan.id}/members`)).json().items;
     expect(m.map((x: any) => [x.user.id, x.role, x.title, x.monthPoints])).toEqual([
-      [leader.user.id, 'leader', 'leader', 10],
+      [leader.user.id, 'leader', 'leader', 1],
       [nav.user.id, 'officer', 'navigator', 0],
       [vet.user.id, 'member', 'driver', 0],
-      [rookie.user.id, 'member', 'rookie', 20],
+      [rookie.user.id, 'member', 'rookie', 2],
     ]);
     expect(m[0].joinedAt).toMatch(/Z$/);
-    expect((await req('GET', `/api/clans/${clan.id}`)).json().monthPoints).toBe(30);
+    expect((await req('GET', `/api/clans/${clan.id}`)).json().monthPoints).toBe(3);
     expect((await req('GET', `/api/users/${rookie.user.id}`)).json().clan).toMatchObject({ role: 'member', title: 'rookie' });
     // permissions follow the role, not the title
     expect((await req('DELETE', `/api/clans/${clan.id}/members/${vet.user.id}`, rookie)).statusCode).toBe(403);
     expect((await req('DELETE', `/api/clans/${clan.id}/members/${vet.user.id}`, nav)).statusCode).toBe(204);
+  });
+});
+
+describe('rate limits', () => {
+  it('POST /api/events counts every attempt per user', async () => {
+    const small = await makeApp({ RATE_LIMIT_CREATE: '2' });
+    try {
+      const u = await register(small, 'Limiter');
+      const post = () => small.inject({ method: 'POST', url: '/api/events', headers: u.auth, payload: { title: 'x' } });
+      expect((await post()).statusCode).toBe(400);
+      expect((await post()).statusCode).toBe(400);
+      const r = await post();
+      expect(r.statusCode).toBe(429);
+      expect(r.json().error.code).toBe('RATE_LIMITED');
+    } finally {
+      await small.close();
+    }
+  });
+
+  it('GET /api/search: 60 per minute per user, or per IP when logged out', async () => {
+    const u = await register(app, 'Seeker');
+    for (let i = 0; i < 60; i++) expect((await req('GET', '/api/search?q=zz', u)).statusCode).toBe(200);
+    expect((await req('GET', '/api/search?q=zz', u)).statusCode).toBe(429);
+    // another user is not affected
+    const v = await register(app, 'Seeker2');
+    expect((await req('GET', '/api/search?q=zz', v)).statusCode).toBe(200);
+    for (let i = 0; i < 60; i++) await req('GET', '/api/search?q=zz');
+    expect((await req('GET', '/api/search?q=zz')).statusCode).toBe(429);
   });
 });

@@ -1,5 +1,6 @@
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import { friendRequests, friendships } from '../db/schema.js';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { friendRequests, friendships, users } from '../db/schema.js';
+import { notFound } from './errors.js';
 import type { Db, Tx } from '../db/index.js';
 
 export const MAX_FRIENDS = 1000;
@@ -124,3 +125,17 @@ export const notBlockedSql = (viewer: string, col: unknown) =>
 
 /** Escape a user string for ILIKE. */
 export const likePattern = (q: string) => `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+
+/**
+ * Lock both users' rows (in id order, so no deadlock). Friend requests, accepts and blocks between the
+ * same two people run one at a time, and the friend caps can't be raced.
+ */
+export async function lockPair(tx: Tx, a: string, b: string) {
+  const rows = await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(inArray(users.id, [a, b]))
+    .orderBy(asc(users.id))
+    .for('update');
+  if (rows.length !== 2) throw notFound('User not found');
+}

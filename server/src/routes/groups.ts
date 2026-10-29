@@ -106,13 +106,14 @@ export async function groupRoutes(app: FastifyInstance) {
 
   /** Socket sync + system messages after commit. */
   const afterCommit = async (convId: string, out: Out) => {
+    // removed / leaving people first: they get group:removed and nothing after it
+    for (const u of out.remove) {
+      app.realtime.removeMember(u, convId);
+      app.realtime.toUser(u, 'group:removed', { conversationId: convId });
+    }
     for (const u of out.add) app.realtime.addMember(u, convId);
     for (const m of out.msgs) await broadcastMessage(app, m, null);
     if (!out.deleted) app.realtime.toConversation(convId, 'group:updated', { conversationId: convId });
-    for (const u of out.remove) {
-      app.realtime.toUser(u, 'group:removed', { conversationId: convId });
-      app.realtime.removeMember(u, convId);
-    }
   };
 
   app.post('/conversations/group', { preHandler: [app.authenticate, createLimit] }, async (req, reply) => {

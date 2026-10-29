@@ -92,7 +92,11 @@ export const spotRatings = pgTable(
     /** v4: when the rating was first given (leaderboard points). Re-rating keeps it. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.spotId, t.userId] }), check('spot_ratings_stars_check', sql`${t.stars} between 1 and 5`)],
+  (t) => [
+    primaryKey({ columns: [t.spotId, t.userId] }),
+    check('spot_ratings_stars_check', sql`${t.stars} between 1 and 5`),
+    index('spot_ratings_created_idx').on(t.createdAt),
+  ],
 );
 
 export const DRIVES = ['4WD', 'AWD', 'FWD', 'RWD'] as const;
@@ -138,7 +142,11 @@ export const carRatings = pgTable(
     /** v4: when the rating was first given (leaderboard points). Re-rating keeps it. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.carId, t.userId] }), check('car_ratings_stars_check', sql`${t.stars} between 1 and 5`)],
+  (t) => [
+    primaryKey({ columns: [t.carId, t.userId] }),
+    check('car_ratings_stars_check', sql`${t.stars} between 1 and 5`),
+    index('car_ratings_created_idx').on(t.createdAt),
+  ],
 );
 
 export const MOD_CATEGORIES = [
@@ -176,7 +184,9 @@ export const mods = pgTable(
 
 export const REPORT_TARGETS = ['spot', 'car', 'user', 'message', 'clan', 'event'] as const;
 
-export const reports = pgTable('reports', {
+export const reports = pgTable(
+  'reports',
+  {
   id: uuid('id').primaryKey().defaultRandom(),
   reporterId: uuid('reporter_id')
     .notNull()
@@ -185,7 +195,9 @@ export const reports = pgTable('reports', {
   targetId: uuid('target_id').notNull(),
   reason: text('reason').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+  },
+  (t) => [index('reports_target_idx').on(t.targetType, t.targetId)],
+);
 
 
 // ---------------- v2: images, clans, chat, blocks ----------------

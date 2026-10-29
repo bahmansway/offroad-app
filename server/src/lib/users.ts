@@ -1,6 +1,6 @@
 import { and, eq, or } from 'drizzle-orm';
 import { blocks, users } from '../db/schema.js';
-import type { Db } from '../db/index.js';
+import type { Db, Tx } from '../db/index.js';
 import { imageUrl } from './images.js';
 
 type UserRow = typeof users.$inferSelect;
@@ -27,7 +27,7 @@ export const privateUser = (u: UserRow) => ({
 });
 
 /** True when either user blocked the other. */
-export async function eitherBlocked(db: Db, a: string, b: string): Promise<boolean> {
+export async function eitherBlocked(db: Db | Tx, a: string, b: string): Promise<boolean> {
   const [row] = await db
     .select({ x: blocks.blockerId })
     .from(blocks)

@@ -284,6 +284,12 @@ export async function eventRoutes(app: FastifyInstance) {
     timeWindow: '1 hour',
     key: (req) => `photo:${req.userId}`,
   });
+  // attempts (incl. failed ones); the 10 created per 24 h rule is also checked in the database below
+  const createLimit = makeLimiter(app, {
+    max: app.config.rateLimits.create,
+    timeWindow: '1 hour',
+    key: (req) => `eventcreate:${req.userId}`,
+  });
   const joinLimit = makeLimiter(app, { max: 60, timeWindow: '1 hour', key: (req) => `eventjoin:${req.userId}` });
   const editLimit = makeLimiter(app, { max: 20, timeWindow: '1 hour', key: (req) => `eventedit:${req.userId}` });
   const leaveLimit = makeLimiter(app, { max: 20, timeWindow: '1 hour', key: (req) => `eventleave:${req.userId}` });
@@ -426,7 +432,7 @@ export async function eventRoutes(app: FastifyInstance) {
   app.get('/events/:id', async (req) => loadEvent(db, idParam(req.params), req.userId));
 
   // ---- create ----
-  app.post('/events', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/events', { preHandler: [app.authenticate, createLimit] }, async (req, reply) => {
     const b = parse(createSchema, req.body);
     const me = req.userId!;
     checkTimes(b.startsAt, b.endsAt);

@@ -264,6 +264,22 @@ describe('friend requests (acceptance check 1)', () => {
     expect((await req('GET', '/api/me/badges', k)).json().friendRequests).toBe(0);
   });
 
+  it('block racing an accept never leaves blocked friends', async () => {
+    for (let i = 0; i < 5; i++) {
+      const x = await register(app, 'RaceX');
+      const y = await register(app, 'RaceY');
+      const id = (await req('POST', '/api/friends/requests', x, { userId: y.user.id })).json().request.id;
+      const [acc, blk] = await Promise.all([
+        req('POST', `/api/friends/requests/${id}/accept`, y),
+        req('POST', `/api/users/${y.user.id}/block`, x),
+      ]);
+      expect(blk.statusCode).toBe(204);
+      expect([200, 403, 404]).toContain(acc.statusCode);
+      const f = await sql.query(`select count(*)::int n from friendships where user_id in ($1, $2)`, [x.user.id, y.user.id]);
+      expect(f.rows[0].n).toBe(0);
+    }
+  });
+
   it('caps: 50 pending outgoing, 1000 friends', async () => {
     const n = await register(app, 'Nigar');
     const targets = await bulkUsers(51, 'capout');

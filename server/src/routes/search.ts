@@ -4,6 +4,7 @@ import { and, asc, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
 import { blocks, clanMembers, clans, conversationMembers, conversations, events, users } from '../db/schema.js';
 import { chatClosedSql } from '../lib/eventState.js';
 import { parse } from '../lib/errors.js';
+import { makeLimiter } from '../lib/limits.js';
 import { imageUrl } from '../lib/images.js';
 import { likePattern, notBlockedSql } from '../lib/friends.js';
 import { userRef } from '../lib/users.js';
@@ -15,9 +16,14 @@ const boardQuery = z.object({ period: z.enum(['month', 'all']).default('month') 
 
 export async function searchRoutes(app: FastifyInstance) {
   const db = app.db;
+  const searchLimit = makeLimiter(app, {
+    max: 60,
+    timeWindow: '1 minute',
+    key: (req) => (req.userId ? `search:u:${req.userId}` : `search:ip:${req.ip}`),
+  });
 
   // Users (friends first, blocked either way left out), clans, and my own chats.
-  app.get('/search', async (req) => {
+  app.get('/search', { preHandler: searchLimit }, async (req) => {
     const { q } = parse(searchQuery, req.query);
     const me = req.userId;
     const like = likePattern(q);

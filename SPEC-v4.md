@@ -31,11 +31,13 @@ Repo: /home/claude/offroad-repo. SPEC-v1..v3 still apply (error format, auth, st
 
 ## 4. Scoreboard (top 20)
 - Points are computed from existing data (no ledger table), in Baku calendar time:
-  - Spot shared: 10 (spot still exists, not removed after reports).
-  - Event organized that finished (not cancelled) with ≥ 2 cars going: 15.
-  - Event attended (status going when the event finished, not organizer): 5.
+  - Spot shared: 10 — only once the spot is ≥ 24 h old, still exists and has no reports; max 10 spots per month.
+  - Event organized that finished (not cancelled) with ≥ 2 cars going: 15; max 4 per month.
+  - Event attended (status going when the event finished, not organizer): 5; max 8 per month.
+  - An event only earns points (organizer or attendee) if it lasted ≥ 1 hour (endsAt, or the 24 h default) and had ≥ 2 cars going.
   - Car added with a photo: 5 (max 2 cars counted).
   - Rating given (spot or car): 1, max 20 per month.
+  - Monthly caps use Baku months; all-time = sum of the monthly caps.
 - `GET /api/leaderboard?period=month|all` → `{period, monthStart, items: [{rank, user: UserSummary(+avatar, currentCar summary, clan tag), points, breakdown: {spots, events, attended, cars, ratings}}] (top 20), me: {rank, points}|null}`.
   Ties: earlier first activity wins. Cache 5 minutes. Blocked users still appear (public board) but can't be opened if blocked.
 - App: entry from Kəşf et header (trophy button) and from Profile ("Reytinq"); page with segmented Bu ay / Ümumi, top 3 podium, rows 4–20, sticky "Sizin yeriniz: #x · y xal" bar; tap → user profile; "Xallar necə qazanılır?" info sheet listing the rules above.
@@ -99,7 +101,7 @@ Only the details and additions beyond the spec above. All v2 and v3 notes still 
   - `group.added`, `group.removed` → `{userId, displayName, byUserId, byDisplayName}`
   - `group.left`, `group.admin` (new admin) → `{userId, displayName}`
   - `group.renamed` → `{name, byUserId, byDisplayName}`
-- Socket: members are added to / removed from the room right away (no reconnect needed). After every change the room gets `group:updated {conversationId}` (reload the chat header / member list). A removed or leaving member gets `group:removed {conversationId}` on their user room and then stops getting events.
+- Socket: members are added to / removed from the room right away (no reconnect needed). After every change the room gets `group:updated {conversationId}` (reload the chat header / member list). A removed or leaving member is taken out of the room first, then gets `group:removed {conversationId}` on their user room, and nothing about that group after it (not the "removed"/"left" system message either).
 - `POST /api/conversations/dm` is unchanged: anyone not blocked.
 
 **Clans: driver titles + points**
@@ -116,13 +118,19 @@ Only the details and additions beyond the spec above. All v2 and v3 notes still 
   - `me`: null when logged out. Logged in: `{rank, points}`; `rank` is null with `points: 0` when you have no points yet.
   - Only users with more than 0 points are ranked. Ties: whoever earned their first point of the period earlier ranks higher.
 - Cached for 5 minutes, so new points can take up to 5 minutes to show (`computedAt` says when).
-- Points, exactly as the rules list them:
-  - Spot shared 10, counted at creation. Deleted spots don't count.
-  - Event organized 15: not cancelled, finished, at least 2 cars going (organizer included). Counted when it ends.
-  - Event attended 5: status going when the event finished, not the organizer. Counted when it ends. Waitlisted or removed people get nothing.
+- Points, exactly as the rules list them (all caps are per Baku month; all-time adds the months up):
+  - Spot shared 10, counted in the month it was created, but only once it is 24 h old and nobody has reported it. Max 10 spots a month. Deleted spots don't count.
+  - Event organized 15, max 4 a month: not cancelled, finished, lasted at least 1 hour, at least 2 cars going (organizer included). Counted when it ends.
+  - Event attended 5, max 8 a month: going when the event finished, not the organizer, same event rules. Waitlisted or removed people get nothing.
   - Car with a photo 5: only your first 2 cars (by creation time) that have a photo. Removing the photo removes the points.
-  - Rating given 1, at most 20 per Baku month (spot or car). Changing a rating later doesn't count again. Rating your own spot gives nothing.
-  - "Finished" = after `endsAt`, or 24 h after `startsAt` if there is no end time.
+  - Rating given 1, at most 20 a month (spot or car). Changing a rating later doesn't count again. Rating your own spot gives nothing.
+  - "Finished" = after `endsAt`, or 24 h after `startsAt` if there is no end time. Length = end minus start.
+  - So a new spot shows up on the board about a day later. Say so in the "Xallar necə qazanılır?" sheet.
+
+**Rate limits (new)**
+- `GET /api/search`: 60 per minute per user (per IP when logged out), then 429.
+- `POST /api/events`: every attempt counts (also failed ones), 30 per hour per user, then 429. The "10 created per 24 h" rule still gives 409.
 
 **Database**
 - Migration `server/drizzle/0004_v4_friends_groups.sql` only adds things: tables `friend_requests` and `friendships`, nullable group columns on `conversations` (`name`, `avatar_image_id`, `admin_id`), and `created_at` on `spot_ratings` / `car_ratings` (old rows get their `updated_at`). The conversation type check now also allows `group`. Tested on a v3 database that already has data.
+- Migration `0005_v4_leaderboard_indexes.sql` only adds indexes (rating `created_at`, reports by target).
