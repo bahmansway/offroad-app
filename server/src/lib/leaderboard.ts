@@ -7,7 +7,7 @@ import { DEFAULT_EVENT_LENGTH_MS } from './eventState.js';
 /**
  * Scoreboard points, worked out from existing tables (no ledger). Months are Baku calendar months
  * (UTC+4, no daylight saving). Anti-farming caps are per Baku month; all-time is the sum of the months.
- * - spot shared: 10, once it is >= 24 h old and has no reports; max 10 spots a month (counted at creation)
+ * - spot shared: 10, once it is >= 24 h old and fewer than 2 different users reported it; max 10 spots a month (counted at creation)
  * - event organized: 15, max 4 a month; attended (going when it finished, not the organizer): 5, max 8 a month.
  *   Only events that finished, were not cancelled, lasted >= 1 h (endsAt, or the 24 h default) and had
  *   >= 2 cars going. Counted when the event ends.
@@ -20,6 +20,8 @@ export const MAX_CARS_COUNTED = 2;
 export const MONTHLY_CAPS = { spots: 10, events: 4, attended: 8, ratings: 20 } as const;
 /** A spot counts only once it is this old and nobody has reported it. */
 export const SPOT_MIN_AGE_HOURS = 24;
+/** A spot loses its points once this many different users reported it (one rival's report is not enough). */
+export const SPOT_REPORTERS_TO_DROP = 2;
 /** Events earn points only if they lasted at least this long and had this many cars going. */
 export const MIN_EVENT_MINUTES = 60;
 export const MIN_CARS_GOING = 2;
@@ -76,7 +78,7 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
       from spots s
       where ${inRange(sql.raw('s.created_at'))}
         and s.created_at <= ${nowIso}::timestamptz - interval '${sql.raw(String(SPOT_MIN_AGE_HOURS))} hours'
-        and not exists (select 1 from reports r where r.target_type = 'spot' and r.target_id = s.id)
+        and (select count(distinct r.reporter_id) from reports r where r.target_type = 'spot' and r.target_id = s.id) < ${sql.raw(String(SPOT_REPORTERS_TO_DROP))}
       union all
       select f.organizer_id, 'events', ${POINTS.organized}::int, f.at, f.id::text
       from finished f

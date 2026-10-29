@@ -118,10 +118,17 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
     await spot(U.u7, '2026-11-03T10:00:00Z');
 
     // anti-farming
-    // U8: a spot younger than 24 h at "now", and a reported spot -> nothing
+    // U8: a spot younger than 24 h at "now", and a spot reported by 2 different users -> nothing
     await spot(U.u8, '2026-11-15T00:00:00Z');
     const reported = await spot(U.u8, '2026-11-03T10:00:00Z');
-    await q(`insert into reports (reporter_id, target_type, target_id, reason) values ($1, 'spot', $2, 'fake')`, [U.u1, reported]);
+    for (const by of [U.u1, U.u2]) {
+      await q(`insert into reports (reporter_id, target_type, target_id, reason) values ($1, 'spot', $2, 'fake')`, [by, reported]);
+    }
+    // U7's spot: one user reported it twice -> still counts (one rival can't wipe points)
+    const u7spot = (await q(`select id from spots where owner_id = $1`, [U.u7])).rows[0].id;
+    for (let i = 0; i < 2; i++) {
+      await q(`insert into reports (reporter_id, target_type, target_id, reason) values ($1, 'spot', $2, 'rival')`, [U.u6, u7spot]);
+    }
     // U9: 12 spots in November (max 10 count) + 3 in October
     for (let i = 0; i < 12; i++) await spot(U.u9, `2026-11-02T${String(10 + i).padStart(2, '0')}:00:00Z`);
     for (let i = 0; i < 3; i++) await spot(U.u9, '2026-10-05T10:00:00Z');

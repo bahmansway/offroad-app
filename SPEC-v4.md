@@ -31,7 +31,7 @@ Repo: /home/claude/offroad-repo. SPEC-v1..v3 still apply (error format, auth, st
 
 ## 4. Scoreboard (top 20)
 - Points are computed from existing data (no ledger table), in Baku calendar time:
-  - Spot shared: 10 — only once the spot is ≥ 24 h old, still exists and has no reports; max 10 spots per month.
+  - Spot shared: 10 — only once the spot is ≥ 24 h old, still exists and has not been reported by 2 or more different users; max 10 spots per month.
   - Event organized that finished (not cancelled) with ≥ 2 cars going: 15; max 4 per month.
   - Event attended (status going when the event finished, not organizer): 5; max 8 per month.
   - An event only earns points (organizer or attendee) if it lasted ≥ 1 hour (endsAt, or the 24 h default) and had ≥ 2 cars going.
@@ -119,7 +119,7 @@ Only the details and additions beyond the spec above. All v2 and v3 notes still 
   - Only users with more than 0 points are ranked. Ties: whoever earned their first point of the period earlier ranks higher.
 - Cached for 5 minutes, so new points can take up to 5 minutes to show (`computedAt` says when).
 - Points, exactly as the rules list them (all caps are per Baku month; all-time adds the months up):
-  - Spot shared 10, counted in the month it was created, but only once it is 24 h old and nobody has reported it. Max 10 spots a month. Deleted spots don't count.
+  - Spot shared 10, counted in the month it was created, but only once it is 24 h old and fewer than 2 different users have reported it (reports from one person alone, however many, don't remove points). Max 10 spots a month. Deleted spots don't count.
   - Event organized 15, max 4 a month: not cancelled, finished, lasted at least 1 hour, at least 2 cars going (organizer included). Counted when it ends.
   - Event attended 5, max 8 a month: going when the event finished, not the organizer, same event rules. Waitlisted or removed people get nothing.
   - Car with a photo 5: only your first 2 cars (by creation time) that have a photo. Removing the photo removes the points.
