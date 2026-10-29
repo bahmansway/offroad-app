@@ -7,7 +7,7 @@ import { badRequest, forbidden, idParam, notFound, parse } from '../lib/errors.j
 import { imageUrl } from '../lib/images.js';
 import { makeLimiter } from '../lib/limits.js';
 import { eitherBlocked, userRef, userRefCols } from '../lib/users.js';
-import { broadcastMessage, toMessage, type Ref } from '../lib/messages.js';
+import { blockersInConversation, broadcastMessage, toMessage, type Ref } from '../lib/messages.js';
 import { chatClosedSql, eventState } from '../lib/eventState.js';
 
 export { toMessage } from '../lib/messages.js';
@@ -382,7 +382,7 @@ export async function chatRoutes(app: FastifyInstance) {
     if (event && eventState(event).readOnly) throw forbidden('This chat is read-only');
     if (!(await canPin(db, conv, event, me))) throw forbidden('You cannot pin messages in this chat');
     const [m] = await db
-      .select({ id: messages.id, deletedAt: messages.deletedAt })
+      .select({ id: messages.id, deletedAt: messages.deletedAt, senderId: messages.senderId })
       .from(messages)
       .where(and(eq(messages.id, messageId), eq(messages.conversationId, id)))
       .limit(1);
@@ -395,10 +395,15 @@ export async function chatRoutes(app: FastifyInstance) {
       .returning();
     const pinned = await pinnedFor(db, updated, me);
     const message = await loadMessageWithSender(db, messageId);
-    app.realtime.toConversation(id, 'conversation:pinned', {
-      conversationId: id,
-      pinned: { message, pinnedBy: me, pinnedAt: updated.pinnedAt!.toISOString() },
-    });
+    // members who blocked the author don't see the message; for them the chat has no visible pin
+    const except = m.senderId ? await blockersInConversation(db, id, m.senderId) : [];
+    app.realtime.toConversation(
+      id,
+      'conversation:pinned',
+      { conversationId: id, pinned: { message, pinnedBy: me, pinnedAt: updated.pinnedAt!.toISOString() } },
+      except,
+    );
+    for (const u of except) app.realtime.toUser(u, 'conversation:pinned', { conversationId: id, pinned: null });
     return { pinned };
   });
 

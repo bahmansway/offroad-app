@@ -7,11 +7,22 @@ import { useAuth } from './auth';
 import { API_URL } from './config';
 import { setSendMessageHandler } from './chatHooks';
 import { createRealtimeClient, type IoFactory, type RealtimeClient, type RealtimeStatus } from './realtimeClient';
-import { applyConversationUpdate, markReadLocal, sortConversations, totalUnread } from './chatLogic';
-import type { Conversation, Id, Message } from './types';
+import {
+  applyConversationUpdate, applyDeletedToList, markReadLocal, patchConversation, sortConversations, totalUnread, unreadAfterRead,
+} from './chatLogic';
+import type { ConversationPinned, Conversation, Id, Message, MessageDeleted, MyClanInvite } from './types';
 
 type MessageListener = (m: Message) => void;
 type PollListener = () => void;
+
+/** Live events other screens can listen to (chat screen, event page, clans list). */
+export interface ChatEvents {
+  deleted: MessageDeleted;
+  pinned: ConversationPinned;
+  eventUpdated: { eventId: Id };
+  clanInvite: MyClanInvite;
+}
+type EventName = keyof ChatEvents;
 
 interface ChatValue {
   conversations: Conversation[] | null;
@@ -28,6 +39,17 @@ interface ChatValue {
   onCatchUp: (fn: PollListener) => () => void;
   /** open (or create) the DM with this user */
   openDm: (userId: Id) => Promise<void>;
+  /** listen to a live event; returns unsubscribe */
+  on: <K extends EventName>(name: K, fn: (p: ChatEvents[K]) => void) => () => void;
+  /** mute / unmute a conversation (per user); throws on failure */
+  setMuted: (id: Id, muted: boolean) => Promise<void>;
+  /** change one conversation locally (pinned etc.) */
+  patch: (id: Id, p: Partial<Conversation>) => void;
+  /** my pending clan invites (Söhbət → Klanlar); null until loaded */
+  invites: MyClanInvite[] | null;
+  reloadInvites: () => Promise<void>;
+  /** fetch the tab badge total again */
+  refreshUnread: () => void;
 }
 
 const ChatContext = createContext<ChatValue | null>(null);
@@ -49,6 +71,37 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const session = useRef(0);
   /** Mirror of `conversations`, so event handlers decide from the current list (not inside an updater). */
   const listRef = useRef<Conversation[] | null>(null);
+  /** server badge total (GET /conversations/unread); null until the first answer → local count is used */
+  const [serverUnread, setServerUnread] = useState<number | null>(null);
+  const [invites, setInvites] = useState<MyClanInvite[] | null>(null);
+  const bus = useRef(new Map<EventName, Set<(p: never) => void>>());
+  const emit = useCallback(<K extends EventName>(name: K, p: ChatEvents[K]) => {
+    bus.current.get(name)?.forEach((fn) => (fn as (x: ChatEvents[K]) => void)(p));
+  }, []);
+  const unreadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshUnread = useCallback(() => {
+    if (!myIdRef.current) return;
+    if (unreadTimer.current) clearTimeout(unreadTimer.current);
+    const my = session.current;
+    unreadTimer.current = setTimeout(() => {
+      unreadTimer.current = null;
+      api.unreadTotal().then((r) => {
+        if (my === session.current && typeof r?.total === 'number') setServerUnread(r.total);
+      }).catch(() => { /* keep the last value */ });
+    }, 250);
+  }, []);
+  const refreshUnreadRef = useRef(refreshUnread);
+  refreshUnreadRef.current = refreshUnread;
+  const reloadInvites = useCallback(async () => {
+    if (!myIdRef.current) return;
+    const my = session.current;
+    try {
+      const r = await api.myClanInvites();
+      if (my === session.current) setInvites(r.items);
+    } catch { /* keep the old list */ }
+  }, []);
+  const reloadInvitesRef = useRef(reloadInvites);
+  reloadInvitesRef.current = reloadInvites;
 
   const setList = useCallback((next: Conversation[] | null) => {
     listRef.current = next;
@@ -67,6 +120,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         // the open chat is being read right now
         setList(sortConversations(open ? markReadLocal(list, open) : list));
         setError(null);
+        refreshUnreadRef.current();
       } catch (e) {
         if (my === session.current) setError(e);
       }
@@ -86,6 +140,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     loading.current = null;
     setList(null);
     setError(null);
+    setServerUnread(null);
+    setInvites(null);
     if (!myId) return;
     const my = session.current;
     const c = createRealtimeClient({
@@ -108,6 +164,28 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         if (r.known) setList(r.list);
         // a new DM or a clan we just joined: fetch the list again
         else reloadRef.current();
+        refreshUnreadRef.current();
+      },
+      onMessageDeleted: (d) => {
+        if (my !== session.current) return;
+        if (listRef.current) setList(applyDeletedToList(listRef.current, d));
+        emit('deleted', d);
+        refreshUnreadRef.current();
+      },
+      onPinned: (p) => {
+        if (my !== session.current) return;
+        if (listRef.current) setList(patchConversation(listRef.current, p.conversationId, { pinned: p.pinned }));
+        emit('pinned', p);
+      },
+      onEventUpdated: (e) => {
+        if (my !== session.current) return;
+        emit('eventUpdated', e);
+        reloadRef.current(); // joined/left/removed/cancelled change the chat list
+      },
+      onClanInvite: (i) => {
+        if (my !== session.current) return;
+        emit('clanInvite', i);
+        reloadInvitesRef.current();
       },
       onReady: () => {
         reloadRef.current();
@@ -120,6 +198,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     });
     rt.current = c;
     reloadRef.current();
+    reloadInvitesRef.current();
     c.start();
 
     // reconnect when the app comes back on screen / the browser is online again
@@ -149,17 +228,44 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       cleanup();
       c.stop();
       rt.current = null;
+      if (unreadTimer.current) clearTimeout(unreadTimer.current);
     };
-  }, [myId, setList]);
+  }, [myId, setList, emit]);
 
   const setOpen = useCallback((id: Id | null) => {
     openRef.current = id;
-    if (id && listRef.current) setList(markReadLocal(listRef.current, id));
+    if (id && listRef.current) {
+      const conv = listRef.current.find((x) => String(x.id) === String(id));
+      setServerUnread((n) => (n == null ? n : unreadAfterRead(n, conv)));
+      setList(markReadLocal(listRef.current, id));
+    }
   }, [setList]);
 
   const markRead = useCallback((id: Id) => {
-    if (listRef.current) setList(markReadLocal(listRef.current, id));
-    api.markRead(id).catch(() => { /* next load fixes the count */ });
+    if (listRef.current) {
+      const conv = listRef.current.find((x) => String(x.id) === String(id));
+      setServerUnread((n) => (n == null ? n : unreadAfterRead(n, conv)));
+      setList(markReadLocal(listRef.current, id));
+    }
+    api.markRead(id).then(() => refreshUnreadRef.current()).catch(() => { /* next load fixes the count */ });
+  }, [setList]);
+
+  const on = useCallback(<K extends EventName>(name: K, fn: (p: ChatEvents[K]) => void) => {
+    let set = bus.current.get(name);
+    if (!set) bus.current.set(name, (set = new Set()));
+    set.add(fn as (p: never) => void);
+    return () => { set!.delete(fn as (p: never) => void); };
+  }, []);
+
+  const patch = useCallback((id: Id, p: Partial<Conversation>) => {
+    if (listRef.current) setList(patchConversation(listRef.current, id, p));
+  }, [setList]);
+
+  const setMuted = useCallback(async (id: Id, muted: boolean) => {
+    const r = muted ? await api.mute(id) : await api.unmute(id);
+    const value = typeof r?.muted === 'boolean' ? r.muted : muted;
+    if (listRef.current) setList(patchConversation(listRef.current, id, { muted: value }));
+    refreshUnreadRef.current();
   }, [setList]);
 
   const subscribe = useCallback((conversationId: Id, fn: MessageListener) => {
@@ -195,10 +301,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => setSendMessageHandler(null);
   }, [myId, openDm]);
 
-  const unread = totalUnread(conversations);
+  const unread = serverUnread ?? totalUnread(conversations);
   const value = useMemo<ChatValue>(
-    () => ({ conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm }),
-    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm],
+    () => ({
+      conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm,
+      on, setMuted, patch, invites, reloadInvites, refreshUnread,
+    }),
+    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm, on, setMuted, patch, invites, reloadInvites, refreshUnread],
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

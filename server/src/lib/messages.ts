@@ -69,22 +69,24 @@ export async function insertSystemMessage(tx: Tx | Db, conversationId: string, k
   return m;
 }
 
+/** Members of a conversation who blocked `userId`. */
+export async function blockersInConversation(db: Db | Tx, conversationId: string, userId: string) {
+  const rows = await db
+    .select({ id: blocks.blockerId })
+    .from(blocks)
+    .innerJoin(
+      conversationMembers,
+      and(eq(conversationMembers.userId, blocks.blockerId), eq(conversationMembers.conversationId, conversationId)),
+    )
+    .where(eq(blocks.blockedId, userId));
+  return rows.map((r) => r.id);
+}
+
 /** Push a stored message to the conversation room (message:new + conversation:updated). */
 export async function broadcastMessage(app: FastifyInstance, m: MessageRow, sender: Ref | null) {
   const msg = toMessage(m, sender);
-  let except: string[] = [];
-  if (m.senderId) {
-    // Members who blocked the sender don't get it.
-    const blockers = await app.db
-      .select({ id: blocks.blockerId })
-      .from(blocks)
-      .innerJoin(
-        conversationMembers,
-        and(eq(conversationMembers.userId, blocks.blockerId), eq(conversationMembers.conversationId, m.conversationId)),
-      )
-      .where(eq(blocks.blockedId, m.senderId));
-    except = blockers.map((x) => x.id);
-  }
+  // Members who blocked the sender don't get it.
+  const except = m.senderId ? await blockersInConversation(app.db, m.conversationId, m.senderId) : [];
   app.realtime.toConversation(m.conversationId, 'message:new', msg, except);
   app.realtime.toConversation(
     m.conversationId,

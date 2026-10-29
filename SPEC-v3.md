@@ -78,16 +78,22 @@ Only the details and additions beyond the spec above. All v2 notes still apply. 
 - `PATCH /api/events/:id`: same fields minus `carId`/`seats`. All are optional, and `null` clears `endsAt`, `spotId`, `meetingPoint` or `minDifficulty`.
   - Only the organizer can do this (403). After start or once cancelled it returns 409. Lowering `maxCars` below the number of cars going returns 409.
   - Raising `maxCars` promotes people from the waitlist right away.
-  - Each edit posts an `event.edited` system message.
+  - An edit posts an `event.edited` system message only when a value really changed. Its `fields` lists only the changed fields.
+  - The "spot or meeting point" check only runs when `spotId` or `meetingPoint` is in the body.
+  - Setting `visibility: 'clan'` always uses the organizer's current clan (the event's `clan` updates). Not in a clan gives 409.
+  - Limit: 20 edits per hour per user, then 429 `RATE_LIMITED`.
+  - Duplicate `requirements` tags are removed, ignoring upper/lower case. The first spelling is kept. This applies to create too.
 - `POST /api/events/:id/cancel {reason? (≤300)}` returns the `Event`. Only the organizer can cancel. If it's already cancelled or finished you get 409.
 - `POST /api/events/:id/join {carId, seats?}` returns the `Event`. Check `myStatus`: 'going', or 'waitlist' when the event is full.
   - Already joined gives 409. Cancelled or already started gives 409. Someone else's car gives 403.
   - Someone the organizer removed gives 403 and can't rejoin. If the user and the organizer have blocked each other, that also gives 403.
   - The waitlist is first come, first served. Joins are done one at a time per event, so even simultaneous joins can't go over `maxCars` (this is tested).
 - `POST /api/events/:id/leave` returns 204. The organizer gets 409 (they cancel instead). Someone not in the event gets 404. If a 'going' person leaves, the first person on the waitlist is promoted.
+  - Limit: 20 per hour per user, then 429.
+  - After cancel or finish, leaving still works, but it posts no "left" message (the chat is read-only). The same goes for removing someone.
 - `GET /api/events/:id/participants` returns `{items: [{user, status: 'going'|'waitlist', isOrganizer, seats, car: {id,make,model,year,photoUrl}|null, joinedAt}]}`. The order is: organizer, then going, then waitlist (in queue order). `car` is null if that car was deleted.
 - `DELETE /api/events/:id/participants/:userId` returns 204. Only the organizer can do this. Removing yourself gives 409, and so does removing someone after the event is over. If a 'going' person is removed, the next one on the waitlist is promoted.
-- `PUT /api/events/:id/cover` takes raw image bytes, the same way as v2 photos (2 MB max). It is resized to 1024px max and counts toward the 20 MB per-user quota. It returns `{coverUrl}`. `DELETE` on the same path returns 204. Only the organizer can do either.
+- `PUT /api/events/:id/cover` takes raw image bytes, the same way as v2 photos (2 MB max). It is resized to 1024px max and counts toward the 20 MB per-user quota. It returns `{coverUrl}`. `DELETE` on the same path returns 204. Only the organizer can do either. After the start or once cancelled, both give 409.
 - `GET /api/spots/:id` now includes `upcomingEvents: EventSummary[]`: up to 5, soonest first, only the ones the viewer can see.
 - `GET /api/clans/:id/events` returns `{items: EventSummary[]}`: up to 20 upcoming events of that clan. Clan-only ones only show for its members.
 - `POST /api/reports` accepts `targetType: 'event'`. A clan-only event you can't see gives 404.
@@ -120,7 +126,7 @@ Only the details and additions beyond the spec above. All v2 notes still apply. 
   - `PUT /api/conversations/:id/pin {messageId}` returns `{pinned}`. `DELETE` on the same path returns 204.
   - Who can pin: in a clan chat the leader or an officer; in an event chat the organizer; in a DM either user. Anyone else gets 403.
   - Pinning a deleted message gives 400. A message from another chat gives 404.
-  - The socket event `conversation:pinned {conversationId, pinned|null}` goes to the room.
+  - The socket event `conversation:pinned {conversationId, pinned|null}` goes to the room. Members who blocked the author of the pinned message get `pinned: null` instead, which matches what REST shows them.
   - `pinned` = `{message: Message, pinnedBy: userId, pinnedAt}`.
 - Mute: `PUT /api/conversations/:id/mute` returns `{muted:true}`. `DELETE` on the same path returns `{muted:false}`. This is per user.
 - `GET /api/conversations/unread` returns `{total}`, for the tab badge. Muted chats, deleted messages and my own messages are not counted.
@@ -148,10 +154,10 @@ Only the details and additions beyond the spec above. All v2 notes still apply. 
   - Not my invite, or already revoked, gives 404. Expired gives 409 "This invite has expired".
   - Already in a clan, or the clan is full, gives 409. The one-clan rule is still enforced by the database.
   - Accepting clears all my other invites and requests.
-- `POST /api/clan-invites/:id/decline` returns 204.
+- `POST /api/clan-invites/:id/decline` returns 204. After a decline, the same clan can't invite that user again for 24 h (409 "...declined an invite recently..."). A declined invite no longer shows in either list and can't be accepted or revoked (404).
 
 **Clan member cap**
 - A clan can have at most 200 members. Join, approve and accepting an invite give 409 "This clan is full (200 members)". Joins are done one at a time per clan, so the cap can't be beaten by joining at the same moment.
 
 **Database**
-- Migration `server/drizzle/0002_v3_events_chat_extras.sql` only adds things: new tables, plus new columns that are either nullable or have a default. Old messages become `type 'user'`. It is tested on a v2 database that already has data in it.
+- Migrations `server/drizzle/0002_v3_events_chat_extras.sql` and `0003_v3_invite_decline.sql` (adds the nullable `clan_invites.declined_at`) only add things: new tables, plus new columns that are either nullable or have a default. Old messages become `type 'user'`. It is tested on a v2 database that already has data in it.

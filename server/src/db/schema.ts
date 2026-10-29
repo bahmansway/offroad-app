@@ -365,6 +365,8 @@ export const clanInvites = pgTable(
     invitedById: uuid('invited_by_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** Set when the invitee declined; the row is kept for a 24 h re-invite cooldown. */
+    declinedAt: timestamp('declined_at', { withTimezone: true }),
   },
   (t) => [uniqueIndex('clan_invites_clan_user_idx').on(t.clanId, t.userId), index('clan_invites_user_idx').on(t.userId)],
 );

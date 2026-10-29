@@ -90,6 +90,8 @@ export interface Spot {
   owner: Owner;
   createdAt: string;
   myRating?: number | null;
+  /** v3: up to 5 upcoming events here that I can see (GET /api/spots/:id only) */
+  upcomingEvents?: EventSummary[];
 }
 
 export interface SpotInput {
@@ -192,14 +194,15 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-export type ReportTarget = 'spot' | 'car' | 'user' | 'message' | 'clan';
+export type ReportTarget = 'spot' | 'car' | 'user' | 'message' | 'clan' | 'event';
 
 export type ErrorCode =
   | 'VALIDATION' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'NOT_FOUND' | 'CONFLICT' | 'RATE_LIMITED'
   | 'NETWORK' | 'UNKNOWN';
 
 // ---------- v2 clans & chat (SPEC-v2 §4 + "Server notes for app builders") ----------
-export type ClanRole = 'leader' | 'member' | 'pending' | null;
+export type ClanRole = 'leader' | 'officer' | 'member' | 'pending' | null;
+export type MemberRole = 'leader' | 'officer' | 'member';
 
 export interface UserRef {
   id: Id;
@@ -233,7 +236,7 @@ export interface ClanInput {
 
 export interface ClanMember {
   user: UserRef;
-  role: 'leader' | 'member';
+  role: MemberRole;
   joinedAt: string;
 }
 
@@ -242,18 +245,34 @@ export interface ClanRequest {
   createdAt: string;
 }
 
+export type SystemKey =
+  | 'event.joined' | 'event.waitlisted' | 'event.left' | 'event.promoted' | 'event.removed'
+  | 'event.cancelled' | 'event.edited';
+
 export interface Message {
   id: Id;
   conversationId: Id;
-  sender: UserRef;
+  /** v3: 'system' messages have no sender; render `systemKey` translated (`text` is an English fallback) */
+  type?: 'user' | 'system';
+  sender: UserRef | null;
   text: string;
   createdAt: string;
   clientId: string | null;
+  systemKey?: SystemKey | string | null;
+  systemParams?: Record<string, unknown> | null;
+  /** v3: set when the sender deleted it (text is then '') */
+  deletedAt?: string | null;
+}
+
+export interface Pinned {
+  message: Message;
+  pinnedBy: Id | null;
+  pinnedAt: string | null;
 }
 
 export interface Conversation {
   id: Id;
-  type: 'dm' | 'clan';
+  type: 'dm' | 'clan' | 'event';
   title: string;
   avatarUrl: string | null;
   clanId: Id | null;
@@ -261,6 +280,13 @@ export interface Conversation {
   lastMessage: Message | null;
   unreadCount: number;
   updatedAt: string;
+  // v3
+  eventId?: Id | null;
+  muted?: boolean;
+  readOnly?: boolean;
+  readOnlyUntil?: string | null;
+  pinned?: Pinned | null;
+  canPin?: boolean;
 }
 
 /** `conversation:updated` socket payload */
@@ -269,3 +295,111 @@ export interface ConversationUpdate {
   lastMessage: Message;
   updatedAt: string;
 }
+
+// ---------- v3 events (SPEC-v3 §2 + "Server notes for app builders (v3)") ----------
+export type EventStatus = 'scheduled' | 'cancelled' | 'finished';
+export type MyEventStatus = 'organizer' | 'going' | 'waitlist' | null;
+export type EventVisibility = 'public' | 'clan';
+
+export interface EventSpot {
+  id: Id;
+  name: string;
+  type: SpotType | null;
+  difficulty: number | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface MeetingPoint {
+  lat: number;
+  lng: number;
+  label: string;
+}
+
+export interface EventSummary {
+  id: Id;
+  title: string;
+  startsAt: string;
+  endsAt: string | null;
+  spot: EventSpot | null;
+  meetingPoint: MeetingPoint | null;
+  maxCars: number;
+  minDifficulty: number | null;
+  requirements: string[];
+  visibility: EventVisibility;
+  clan: { id: Id; name: string; tag: string } | null;
+  organizer: UserRef;
+  status: EventStatus;
+  participantCount: number;
+  carCount: number;
+  waitlistCount: number;
+  isFull: boolean;
+  myStatus: MyEventStatus;
+  coverUrl: string | null;
+}
+
+export interface EventDetail extends EventSummary {
+  description: string;
+  cancelReason: string | null;
+  cancelledAt: string | null;
+  conversationId: Id | null;
+  chatReadOnly: boolean;
+  canEdit: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventInput {
+  title: string;
+  description?: string;
+  startsAt: string;
+  endsAt?: string | null;
+  spotId?: Id | null;
+  meetingPoint?: { lat: number; lng: number; label?: string } | null;
+  maxCars: number;
+  minDifficulty?: number | null;
+  requirements?: string[];
+  visibility?: EventVisibility;
+}
+
+export interface EventCreateInput extends EventInput {
+  carId: Id;
+  seats?: number;
+}
+
+export interface EventParticipant {
+  user: UserRef;
+  status: 'going' | 'waitlist';
+  isOrganizer: boolean;
+  seats: number;
+  car: { id: Id; make: string; model: string; year: number; photoUrl: string | null } | null;
+  joinedAt: string;
+}
+
+export type EventScope = 'upcoming' | 'mine' | 'past';
+
+// ---------- v3 clan invites ----------
+export interface ClanInviteClan { id: Id; name: string; tag: string; logoUrl: string | null }
+
+/** GET /api/clans/:id/invites item (leader/officer view) */
+export interface ClanInvite {
+  id: Id;
+  user: UserRef;
+  invitedById: Id | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** GET /api/me/clan-invites item, and the `clan:invite` socket payload */
+export interface MyClanInvite {
+  id: Id;
+  clan: ClanInviteClan;
+  invitedBy: UserRef | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** `message:deleted` socket payload */
+export interface MessageDeleted { id: Id; conversationId: Id; deletedAt: string }
+/** `conversation:pinned` socket payload */
+export interface ConversationPinned { conversationId: Id; pinned: Pinned | null }

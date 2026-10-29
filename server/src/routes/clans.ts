@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, desc, eq, gt, ilike, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { clanInvites, clanMembers, clanRequests, clans, conversations, events, users } from '../db/schema.js';
 import type { Db, Tx } from '../db/index.js';
 import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
@@ -17,6 +17,8 @@ type Role = MemberRole | 'pending' | null;
 export const CLAN_MEMBER_CAP = 200;
 export const MAX_PENDING_INVITES = 30;
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** After a decline the same clan can invite that user again only after this. */
+export const REINVITE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const isStaff = (r: Role) => r === 'leader' || r === 'officer';
 
 const name = z.string().trim().min(3).max(40);
@@ -476,7 +478,7 @@ export async function clanRoutes(app: FastifyInstance) {
   });
 
   // ---- invites ----
-  const pendingInvite = gt(clanInvites.expiresAt, sql`now()`);
+  const pendingInvite = and(gt(clanInvites.expiresAt, sql`now()`), isNull(clanInvites.declinedAt))!;
   const toInvite = (r: { inv: typeof clanInvites.$inferSelect; clan: ClanRow }) => ({
     id: r.inv.id,
     clan: { id: r.clan.id, name: r.clan.name, tag: r.clan.tag, logoUrl: imageUrl(r.clan.logoImageId) },
@@ -496,13 +498,28 @@ export async function clanRoutes(app: FastifyInstance) {
       const [inClan] = await tx.select({ clanId: clanMembers.clanId }).from(clanMembers).where(eq(clanMembers.userId, userId));
       if (inClan) throw conflict(inClan.clanId === id ? 'This user is already in your clan' : 'This user is already in a clan');
       // expired invites don't count and can be replaced
-      await tx.delete(clanInvites).where(and(eq(clanInvites.clanId, id), lte(clanInvites.expiresAt, sql`now()`)));
+      // declined ones are kept for the cooldown, then can be replaced too
+      await tx
+        .delete(clanInvites)
+        .where(
+          and(
+            eq(clanInvites.clanId, id),
+            or(
+              and(isNull(clanInvites.declinedAt), lte(clanInvites.expiresAt, sql`now()`)),
+              lte(clanInvites.declinedAt, new Date(Date.now() - REINVITE_COOLDOWN_MS)),
+            ),
+          ),
+        );
       const [dup] = await tx
-        .select({ id: clanInvites.id })
+        .select({ id: clanInvites.id, declinedAt: clanInvites.declinedAt })
         .from(clanInvites)
         .where(and(eq(clanInvites.clanId, id), eq(clanInvites.userId, userId)));
+      if (dup?.declinedAt) throw conflict('This user declined an invite recently; try again in 24 hours');
       if (dup) throw conflict('This user already has a pending invite');
-      const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(clanInvites).where(eq(clanInvites.clanId, id));
+      const [n] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(clanInvites)
+        .where(and(eq(clanInvites.clanId, id), isNull(clanInvites.declinedAt)));
       if (n.n >= MAX_PENDING_INVITES) throw conflict(`At most ${MAX_PENDING_INVITES} pending invites per clan`);
       const [row] = await tx
         .insert(clanInvites)
@@ -542,7 +559,7 @@ export async function clanRoutes(app: FastifyInstance) {
     await asStaff(id, req.userId!, async (tx) => {
       const del = await tx
         .delete(clanInvites)
-        .where(and(eq(clanInvites.id, inviteId), eq(clanInvites.clanId, id)))
+        .where(and(eq(clanInvites.id, inviteId), eq(clanInvites.clanId, id), isNull(clanInvites.declinedAt)))
         .returning({ id: clanInvites.id });
       if (!del.length) throw notFound('Invite not found');
     });
@@ -570,7 +587,7 @@ export async function clanRoutes(app: FastifyInstance) {
     const [inv] = await tx
       .select()
       .from(clanInvites)
-      .where(and(eq(clanInvites.id, inviteId), eq(clanInvites.userId, me)))
+      .where(and(eq(clanInvites.id, inviteId), eq(clanInvites.userId, me), isNull(clanInvites.declinedAt)))
       .limit(1);
     if (!inv) throw notFound('Invite not found');
     return inv;
@@ -596,7 +613,11 @@ export async function clanRoutes(app: FastifyInstance) {
     const inviteId = idParam(req.params);
     const me = req.userId!;
     await myInvite(db, inviteId, me);
-    await db.delete(clanInvites).where(and(eq(clanInvites.id, inviteId), eq(clanInvites.userId, me)));
+    // kept (not deleted) so the clan can't re-invite right away
+    await db
+      .update(clanInvites)
+      .set({ declinedAt: new Date() })
+      .where(and(eq(clanInvites.id, inviteId), eq(clanInvites.userId, me), isNull(clanInvites.declinedAt)));
     return reply.status(204).send();
   });
 }

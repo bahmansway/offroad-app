@@ -1,4 +1,4 @@
-import type { Conversation, ConversationUpdate, Id, Message } from './types';
+import type { Conversation, ConversationUpdate, Id, Message, MessageDeleted, Pinned } from './types';
 import { sameId } from './format';
 
 /**
@@ -69,8 +69,8 @@ export function mergeMessages(current: ChatItem[], incoming: Message[]): ChatIte
   for (const m of incoming) {
     confirmed.set(String(m.id), { ...m, status: undefined });
   }
-  for (const m of confirmed.values()) if (m.clientId) confirmedKeys.add(`${m.sender.id}|${m.clientId}`);
-  const stillPending = pending.filter((p) => !(p.clientId && confirmedKeys.has(`${p.sender.id}|${p.clientId}`)));
+  for (const m of confirmed.values()) if (m.clientId && m.sender) confirmedKeys.add(`${m.sender.id}|${m.clientId}`);
+  const stillPending = pending.filter((p) => !(p.clientId && p.sender && confirmedKeys.has(`${p.sender.id}|${p.clientId}`)));
   const sorted = [...confirmed.values()].sort(byTime);
   // drop the status key so equal objects stay equal
   for (const m of sorted) if (m.status === undefined) delete m.status;
@@ -94,6 +94,23 @@ export function mergeLatestPage(current: ChatItem[], page: { items: Message[]; h
   return mergeMessages(current, page.items);
 }
 
+/** Apply a `message:deleted` event (or my own delete): text cleared, placeholder shown. Unknown id → unchanged. */
+export function applyDeleted(items: ChatItem[], d: Pick<MessageDeleted, 'id' | 'deletedAt'>): ChatItem[] {
+  let hit = false;
+  const out = items.map((m) => {
+    if (!sameId(m.id, d.id) || m.deletedAt) return m;
+    hit = true;
+    return { ...m, text: '', deletedAt: d.deletedAt };
+  });
+  return hit ? out : items;
+}
+
+/** A deleted pinned message is unpinned by the server; mirror that locally. */
+export function pinnedAfterDelete(pinned: Pinned | null | undefined, deletedId: Id): Pinned | null {
+  if (!pinned) return null;
+  return sameId(pinned.message.id, deletedId) ? null : pinned;
+}
+
 /** Mark one optimistic message as sending/failed. */
 export function setStatus(items: ChatItem[], clientId: string, status: SendStatus): ChatItem[] {
   return items.map((m) => (isLocal(m) && m.clientId === clientId ? { ...m, status } : m));
@@ -114,13 +131,50 @@ export function oldestId(items: ChatItem[]): Id | undefined {
 /** Clan chat pinned on top, then newest first. */
 export function sortConversations(list: Conversation[]): Conversation[] {
   return [...list].sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'clan' ? -1 : 1;
+    if ((a.type === 'clan') !== (b.type === 'clan')) return a.type === 'clan' ? -1 : 1;
     return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
   });
 }
 
+/** Unread count to show on a row: hidden (0) while muted. */
+export function visibleUnread(c: Pick<Conversation, 'unreadCount' | 'muted'>): number {
+  return c.muted ? 0 : Math.max(0, c.unreadCount || 0);
+}
+
+/** Local total (muted chats not counted). The tab badge prefers the server's /conversations/unread. */
 export function totalUnread(list: Conversation[] | null | undefined): number {
-  return (list ?? []).reduce((n, c) => n + Math.max(0, c.unreadCount || 0), 0);
+  return (list ?? []).reduce((n, c) => n + visibleUnread(c), 0);
+}
+
+/** Change one conversation in the list (mute, pin, …). */
+export function patchConversation(list: Conversation[], id: Id, patch: Partial<Conversation>): Conversation[] {
+  let hit = false;
+  const out = list.map((c) => {
+    if (!sameId(c.id, id)) return c;
+    hit = true;
+    return { ...c, ...patch };
+  });
+  return hit ? out : list;
+}
+
+/** A message in this list was deleted: update the preview if it was the last one, and drop it from the pin. */
+export function applyDeletedToList(list: Conversation[], d: MessageDeleted): Conversation[] {
+  let hit = false;
+  const out = list.map((c) => {
+    if (!sameId(c.id, d.conversationId)) return c;
+    const last = c.lastMessage && sameId(c.lastMessage.id, d.id) ? { ...c.lastMessage, text: '', deletedAt: d.deletedAt } : c.lastMessage;
+    const pinned = pinnedAfterDelete(c.pinned, d.id);
+    if (last === c.lastMessage && pinned === (c.pinned ?? null)) return c;
+    hit = true;
+    return { ...c, lastMessage: last, pinned };
+  });
+  return hit ? out : list;
+}
+
+/** Badge after opening a chat: the server total minus what that chat had (muted chats are not in the total). */
+export function unreadAfterRead(total: number, conv: Pick<Conversation, 'unreadCount' | 'muted'> | undefined): number {
+  if (!conv) return total;
+  return Math.max(0, total - visibleUnread(conv));
 }
 
 /** Tab-bar badge text: undefined when nothing is unread, "99+" for big numbers. */
@@ -143,7 +197,7 @@ export function applyConversationUpdate(
   if (i < 0) return { list, known: false };
   const c = list[i];
   const isNew = !c.lastMessage || !sameId(c.lastMessage.id, u.lastMessage.id);
-  const fromOther = !sameId(u.lastMessage.sender.id, opts.myId);
+  const fromOther = !sameId(u.lastMessage.sender?.id, opts.myId);
   const open = sameId(opts.openId, u.id);
   const newer = !c.lastMessage || Date.parse(u.lastMessage.createdAt) >= Date.parse(c.lastMessage.createdAt);
   const next: Conversation = {
@@ -166,6 +220,7 @@ export function markReadLocal(list: Conversation[], id: Id): Conversation[] {
 
 export type ChatRow =
   | { kind: 'day'; key: string; day: string }
+  | { kind: 'system'; key: string; msg: ChatItem }
   | { kind: 'msg'; key: string; msg: ChatItem; mine: boolean; firstOfRun: boolean; lastOfRun: boolean };
 
 /** Local calendar day "YYYY-MM-DD". */
@@ -191,10 +246,15 @@ export function buildRows(items: ChatItem[], myId: Id | null | undefined): ChatR
       rows.push({ kind: 'day', key: `day:${day}`, day });
       lastDay = day;
     }
+    if (m.type === 'system' || !m.sender) {
+      rows.push({ kind: 'system', key: `m:${m.id}`, msg: m });
+      continue;
+    }
     const prev = items[i - 1];
     const next = items[i + 1];
     const sameRun = (a?: ChatItem, b?: ChatItem) =>
-      !!a && !!b && sameId(a.sender.id, b.sender.id) && dayKey(a.createdAt) === dayKey(b.createdAt)
+      !!a && !!b && !!a.sender && !!b.sender && a.type !== 'system' && b.type !== 'system'
+      && sameId(a.sender.id, b.sender.id) && dayKey(a.createdAt) === dayKey(b.createdAt)
       && Math.abs(Date.parse(b.createdAt) - Date.parse(a.createdAt)) < RUN_GAP_MS;
     rows.push({
       kind: 'msg',
@@ -238,12 +298,18 @@ export function listTime(iso: string, now: Date, yesterday: string): string {
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-/** One-line preview: "You: …" for mine, "Rauf: …" in clan chats. */
-export function previewText(c: Conversation, myId: Id | null | undefined, youLabel: string): string {
+/**
+ * One-line preview: "You: …" for mine, "Rauf: …" in clan and event chats. `render` turns system /
+ * deleted messages into text (see lib/systemMessages `messageText`); without it the raw text is used.
+ */
+export function previewText(
+  c: Conversation, myId: Id | null | undefined, youLabel: string, render?: (m: Message) => string,
+): string {
   const m = c.lastMessage;
   if (!m) return '';
-  const text = m.text.replace(/\s+/g, ' ').trim();
+  const text = (render ? render(m) : m.text).replace(/\s+/g, ' ').trim();
+  if (m.type === 'system' || !m.sender) return text;
   if (sameId(m.sender.id, myId)) return `${youLabel}: ${text}`;
-  if (c.type === 'clan') return `${m.sender.displayName}: ${text}`;
+  if (c.type === 'clan' || c.type === 'event') return `${m.sender.displayName}: ${text}`;
   return text;
 }

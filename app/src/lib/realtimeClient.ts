@@ -1,4 +1,4 @@
-import type { ConversationUpdate, Message } from './types';
+import type { ConversationPinned, ConversationUpdate, Id, Message, MessageDeleted, MyClanInvite } from './types';
 
 /**
  * Live chat connection (Socket.IO). No React here so the reconnect rules can be unit-tested.
@@ -43,6 +43,14 @@ export interface RealtimeOptions {
   refresh: (stale: string | undefined) => Promise<string | null>;
   onMessage?: (m: Message) => void;
   onConversation?: (u: ConversationUpdate) => void;
+  /** v3: `message:deleted` */
+  onMessageDeleted?: (d: MessageDeleted) => void;
+  /** v3: `conversation:pinned` */
+  onPinned?: (p: ConversationPinned) => void;
+  /** v3: `event:updated` (join/leave/edit/cancel — reload the event page) */
+  onEventUpdated?: (e: { eventId: Id }) => void;
+  /** v3: `clan:invite` (someone invited me) */
+  onClanInvite?: (i: MyClanInvite) => void;
   onStatus?: (s: RealtimeStatus) => void;
   /** fires right after a (re)connect is ready, so the app can catch up on what it missed */
   onReady?: () => void;
@@ -181,6 +189,10 @@ export function createRealtimeClient(o: RealtimeOptions) {
     });
     s.on('message:new', (m: Message) => o.onMessage?.(m));
     s.on('conversation:updated', (u: ConversationUpdate) => o.onConversation?.(u));
+    s.on('message:deleted', (d: MessageDeleted) => { if (d && d.id != null) o.onMessageDeleted?.(d); });
+    s.on('conversation:pinned', (p: ConversationPinned) => { if (p && p.conversationId != null) o.onPinned?.(p); });
+    s.on('event:updated', (e: { eventId: Id }) => { if (e && e.eventId != null) o.onEventUpdated?.(e); });
+    s.on('clan:invite', (i: MyClanInvite) => { if (i && i.id != null) o.onClanInvite?.(i); });
     s.on('connect_error', (err: { message?: string } | undefined) => {
       if (stopped) return;
       setStatus('offline');

@@ -14,7 +14,7 @@ import {
 } from '../db/schema.js';
 import type { Db, Tx } from '../db/index.js';
 import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
-import { deleteImage, imageUrl, MAX_UPLOAD_BYTES, storeImage } from '../lib/images.js';
+import { deleteImage, imageUrl, MAX_UPLOAD_BYTES, processImage, saveImage } from '../lib/images.js';
 import { makeLimiter } from '../lib/limits.js';
 import { eitherBlocked, isForeignKeyViolation, userRef, userRefCols } from '../lib/users.js';
 import { broadcastMessage, insertSystemMessage, type SystemKey } from '../lib/messages.js';
@@ -30,7 +30,11 @@ const MAX_LENGTH_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ---------------- validation ----------------
 
-const requirements = z.array(z.string().trim().min(1).max(24)).max(8);
+/** Up to 8 tags; duplicates (ignoring upper/lower case) are dropped, first spelling kept. */
+const requirements = z
+  .array(z.string().trim().min(1).max(24))
+  .max(8)
+  .transform((tags) => tags.filter((t, i) => tags.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i));
 const meetingPoint = z
   .object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), label: z.string().trim().max(80).default('') })
   .strict();
@@ -240,6 +244,37 @@ function decodeCursor(c: string) {
   return { d, id };
 }
 
+/** Names of the fields an edit really changed (compared with the stored event). */
+function changedFields(e: EventRow, b: z.infer<typeof patchSchema>, set: Partial<typeof events.$inferInsert>) {
+  const same = (a: unknown, c: unknown) => JSON.stringify(a ?? null) === JSON.stringify(c ?? null);
+  const time = (d: Date | null | undefined) => (d ? d.getTime() : null);
+  const out: string[] = [];
+  if (b.title !== undefined && b.title !== e.title) out.push('title');
+  if (b.description !== undefined && b.description !== e.description) out.push('description');
+  if (b.startsAt !== undefined && time(b.startsAt) !== time(e.startsAt)) out.push('startsAt');
+  if (b.endsAt !== undefined && time(b.endsAt) !== time(e.endsAt)) out.push('endsAt');
+  if (b.spotId !== undefined && !same(b.spotId, e.spotId)) out.push('spotId');
+  if (
+    b.meetingPoint !== undefined &&
+    !same(
+      b.meetingPoint ? [b.meetingPoint.lat, b.meetingPoint.lng, b.meetingPoint.label] : null,
+      e.meetingLat !== null ? [e.meetingLat, e.meetingLng, e.meetingLabel ?? ''] : null,
+    )
+  ) {
+    out.push('meetingPoint');
+  }
+  if (b.maxCars !== undefined && b.maxCars !== e.maxCars) out.push('maxCars');
+  if (b.minDifficulty !== undefined && !same(b.minDifficulty, e.minDifficulty)) out.push('minDifficulty');
+  if (b.requirements !== undefined && !same(b.requirements, e.requirements)) out.push('requirements');
+  if (
+    b.visibility !== undefined &&
+    (b.visibility !== e.visibility || (set.clanId !== undefined && set.clanId !== e.clanId))
+  ) {
+    out.push('visibility');
+  }
+  return out;
+}
+
 // ---------------- routes ----------------
 
 export async function eventRoutes(app: FastifyInstance) {
@@ -250,6 +285,8 @@ export async function eventRoutes(app: FastifyInstance) {
     key: (req) => `photo:${req.userId}`,
   });
   const joinLimit = makeLimiter(app, { max: 60, timeWindow: '1 hour', key: (req) => `eventjoin:${req.userId}` });
+  const editLimit = makeLimiter(app, { max: 20, timeWindow: '1 hour', key: (req) => `eventedit:${req.userId}` });
+  const leaveLimit = makeLimiter(app, { max: 20, timeWindow: '1 hour', key: (req) => `eventleave:${req.userId}` });
 
   /** Pushes system messages and membership changes to sockets after the transaction committed. */
   const afterCommit = async (
@@ -449,7 +486,7 @@ export async function eventRoutes(app: FastifyInstance) {
   });
 
   // ---- edit (organizer, before start) ----
-  app.patch('/events/:id', { preHandler: app.authenticate }, async (req) => {
+  app.patch('/events/:id', { preHandler: [app.authenticate, editLimit] }, async (req) => {
     const id = idParam(req.params);
     const b = parse(patchSchema, req.body);
     const me = req.userId!;
@@ -463,9 +500,11 @@ export async function eventRoutes(app: FastifyInstance) {
       const startsAt = b.startsAt ?? e.startsAt;
       const endsAt = b.endsAt !== undefined ? b.endsAt : e.endsAt;
       if (b.startsAt !== undefined || b.endsAt !== undefined) checkTimes(startsAt, endsAt);
-      const spotId = b.spotId !== undefined ? b.spotId : e.spotId;
-      const mp = b.meetingPoint !== undefined ? b.meetingPoint : e.meetingLat !== null ? { lat: e.meetingLat } : null;
-      if (!spotId && !mp) throw badRequest('Pick a spot or a meeting point');
+      if (b.spotId !== undefined || b.meetingPoint !== undefined) {
+        const spotId = b.spotId !== undefined ? b.spotId : e.spotId;
+        const mp = b.meetingPoint !== undefined ? b.meetingPoint : e.meetingLat !== null ? { lat: e.meetingLat } : null;
+        if (!spotId && !mp) throw badRequest('Pick a spot or a meeting point');
+      }
       const set: Partial<typeof events.$inferInsert> = { updatedAt: new Date() };
       if (b.title !== undefined) set.title = b.title;
       if (b.description !== undefined) set.description = b.description;
@@ -481,7 +520,8 @@ export async function eventRoutes(app: FastifyInstance) {
       if (b.requirements !== undefined) set.requirements = b.requirements;
       if (b.visibility !== undefined) {
         set.visibility = b.visibility;
-        if (b.visibility === 'clan' && !e.clanId) {
+        if (b.visibility === 'clan') {
+          // always the organizer's clan right now (they may have changed clan since creating the event)
           const clanId = await myClanId(tx, me);
           if (!clanId) throw conflict('Join a clan to make this a clan-only event');
           set.clanId = clanId;
@@ -501,7 +541,7 @@ export async function eventRoutes(app: FastifyInstance) {
         if (isForeignKeyViolation(err)) throw notFound('Spot not found');
         throw err;
       }
-      const changed = Object.keys(b).filter((k) => (b as Record<string, unknown>)[k] !== undefined);
+      const changed = changedFields(e, b, set);
       if (changed.length) await sysMsg(tx, convId, out.msgs, 'event.edited', { fields: changed });
       if (b.maxCars !== undefined && b.maxCars > e.maxCars) await promote(tx, { ...e, maxCars: b.maxCars }, convId, out.msgs);
       return convId;
@@ -596,14 +636,17 @@ export async function eventRoutes(app: FastifyInstance) {
         .delete(conversationMembers)
         .where(and(eq(conversationMembers.conversationId, convId), eq(conversationMembers.userId, userId)));
     }
-    await sysMsg(tx, convId, msgs, removed ? 'event.removed' : 'event.left', {
-      userId,
-      displayName: await displayName(tx, userId),
-    });
+    // a read-only (cancelled / finished) chat gets no more messages
+    if (!eventState(e).readOnly) {
+      await sysMsg(tx, convId, msgs, removed ? 'event.removed' : 'event.left', {
+        userId,
+        displayName: await displayName(tx, userId),
+      });
+    }
     if (p.status === 'going') await promote(tx, e, convId, msgs);
   };
 
-  app.post('/events/:id/leave', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/events/:id/leave', { preHandler: [app.authenticate, leaveLimit] }, async (req, reply) => {
     const id = idParam(req.params);
     const me = req.userId!;
     const out = { msgs: [] as MsgRow[], add: [] as string[], remove: [me] };
@@ -670,25 +713,37 @@ export async function eventRoutes(app: FastifyInstance) {
   });
 
   // ---- cover photo (organizer; same pipeline + quota as other photos) ----
-  const loadOrganized = async (id: string, me: string) => {
-    const [e] = await db.select().from(events).where(and(eq(events.id, id), visibleSql(me))).limit(1);
-    if (!e) throw notFound('Event not found');
+  /** Checks for cover changes: visible, organizer, not started / cancelled. Runs under the event row lock. */
+  const checkCoverEdit = async (tx: Tx, e: EventRow, me: string) => {
+    await assertVisible(tx, e.id, me);
     if (e.organizerId !== me) throw forbidden('Only the organizer can change the cover');
-    return e;
+    if (e.status === 'cancelled') throw conflict('This event was cancelled');
+    if (e.startsAt.getTime() <= Date.now()) throw conflict('The cover cannot be changed after the event started');
   };
   app.put('/events/:id/cover', { bodyLimit: MAX_UPLOAD_BYTES, preHandler: [app.authenticate, photoLimit] }, async (req) => {
     const id = idParam(req.params);
-    const e = await loadOrganized(id, req.userId!);
-    const imageId = await storeImage(db, req.userId!, 'event', req.body, e.coverImageId);
-    await db.update(events).set({ coverImageId: imageId }).where(eq(events.id, id));
-    await deleteImage(db, e.coverImageId);
+    const me = req.userId!;
+    // cheap checks first (no image work for outsiders), then resize outside the lock, then save under it
+    await withEventLock(id, (tx, e) => checkCoverEdit(tx, e, me));
+    const processed = await processImage(req.body, 'event');
+    const { imageId, old } = await withEventLock(id, async (tx, e) => {
+      await checkCoverEdit(tx, e, me);
+      const imageId = await saveImage(tx, me, 'event', processed, e.coverImageId);
+      await tx.update(events).set({ coverImageId: imageId }).where(eq(events.id, id));
+      return { imageId, old: e.coverImageId };
+    });
+    await deleteImage(db, old);
     return { coverUrl: imageUrl(imageId) };
   });
   app.delete('/events/:id/cover', { preHandler: app.authenticate }, async (req, reply) => {
     const id = idParam(req.params);
-    const e = await loadOrganized(id, req.userId!);
-    await db.update(events).set({ coverImageId: null }).where(eq(events.id, id));
-    await deleteImage(db, e.coverImageId);
+    const me = req.userId!;
+    const old = await withEventLock(id, async (tx, e) => {
+      await checkCoverEdit(tx, e, me);
+      await tx.update(events).set({ coverImageId: null }).where(eq(events.id, id));
+      return e.coverImageId;
+    });
+    await deleteImage(db, old);
     return reply.status(204).send();
   });
 }

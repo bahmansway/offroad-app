@@ -458,3 +458,92 @@ describe('events: list, limits, cover', () => {
     expect(rows[0].n).toBe(0);
   });
 });
+
+// ---------------- review fixes ----------------
+
+describe('review fixes: events', () => {
+  it('edit: 20 per hour; "edited" message only when something changed', async () => {
+    const u = await register(app, 'Editor');
+    await addCar(u);
+    const e = (await req('POST', '/api/events', u, eventBody(u, { title: 'Same title', requirements: ['4WD'] }))).json();
+    const count = async () => (await messagesOf(e.conversationId, u)).filter((m) => m.systemKey === 'event.edited').length;
+    // no real change -> no message
+    expect((await req('PATCH', `/api/events/${e.id}`, u, { title: 'Same title', maxCars: 2, requirements: ['4WD'], spotId, visibility: 'public', startsAt: e.startsAt })).statusCode).toBe(200);
+    expect(await count()).toBe(0);
+    expect((await req('PATCH', `/api/events/${e.id}`, u, { title: 'New title', maxCars: 2 })).statusCode).toBe(200);
+    const msgs = (await messagesOf(e.conversationId, u)).filter((m) => m.systemKey === 'event.edited');
+    expect(msgs.map((m) => m.systemParams)).toEqual([{ fields: ['title'] }]);
+    for (let i = 2; i < 20; i++) expect((await req('PATCH', `/api/events/${e.id}`, u, { title: `Title ${i}` })).statusCode).toBe(200);
+    const r = await req('PATCH', `/api/events/${e.id}`, u, { title: 'One too many' });
+    expect(r.statusCode).toBe(429);
+    expect(r.json().error.code).toBe('RATE_LIMITED');
+  });
+
+  it('leave: 20 per hour', async () => {
+    const u = await register(app, 'Leaver');
+    const e = (await req('POST', '/api/events', org, eventBody(org, { title: 'Leave spam' }))).json();
+    for (let i = 0; i < 20; i++) expect((await req('POST', `/api/events/${e.id}/leave`, u)).statusCode).toBe(404);
+    expect((await req('POST', `/api/events/${e.id}/leave`, u)).statusCode).toBe(429);
+  });
+
+  it('switching to clan-only uses the organizer\'s current clan; 409 without one', async () => {
+    const u = await register(app, 'Switcher');
+    await addCar(u);
+    const clanA = (await req('POST', '/api/clans', u, { name: 'Clan Alpha', tag: 'ALFA' })).json();
+    const e = (await req('POST', '/api/events', u, eventBody(u, { title: 'Public first' }))).json();
+    expect(e.clan).toMatchObject({ id: clanA.id });
+    expect((await req('DELETE', `/api/clans/${clanA.id}`, u)).statusCode).toBe(204);
+    // no clan now
+    expect((await req('PATCH', `/api/events/${e.id}`, u, { visibility: 'clan' })).statusCode).toBe(409);
+    const clanB = (await req('POST', '/api/clans', u, { name: 'Clan Bravo', tag: 'BRVO' })).json();
+    const r = await req('PATCH', `/api/events/${e.id}`, u, { visibility: 'clan' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ visibility: 'clan', clan: { id: clanB.id, name: 'Clan Bravo' } });
+  });
+
+  it('requirement tags are de-duplicated (ignoring case)', async () => {
+    const org = await register(app, 'Tagger');
+    await addCar(org);
+    const e = (await req('POST', '/api/events', org, eventBody(org, { title: 'Tags', requirements: ['4WD', '4wd', 'Winch', ' winch ', 'Radio'] }))).json();
+    expect(e.requirements).toEqual(['4WD', 'Winch', 'Radio']);
+    const p = (await req('PATCH', `/api/events/${e.id}`, org, { requirements: ['Radio', 'RADIO'] })).json();
+    expect(p.requirements).toEqual(['Radio']);
+  });
+
+  it('spot / meeting point presence is only checked when those fields change', async () => {
+    const u = await register(app, 'SpotLoser');
+    await addCar(u);
+    const sp = (await req('POST', '/api/spots', u, { type: 'camp', name: 'Temporary camp', lat: 40.5, lng: 49.5 })).json();
+    const e = (await req('POST', '/api/events', u, eventBody(u, { title: 'Camp night', spotId: sp.id }))).json();
+    expect((await req('DELETE', `/api/spots/${sp.id}`, u)).statusCode).toBe(204);
+    expect((await req('PATCH', `/api/events/${e.id}`, u, { title: 'Camp night (moved)' })).statusCode).toBe(200);
+    expect((await req('PATCH', `/api/events/${e.id}`, u, { spotId: null })).statusCode).toBe(400);
+  });
+
+  it('no "left" message once the chat is read-only', async () => {
+    const org = await register(app, 'Quiet');
+    await addCar(org);
+    const e = (await req('POST', '/api/events', org, eventBody(org, { title: 'Quiet after cancel', maxCars: 5 }))).json();
+    await req('POST', `/api/events/${e.id}/join`, third, { carId: car(third) });
+    await req('POST', `/api/events/${e.id}/cancel`, org, {});
+    expect((await req('POST', `/api/events/${e.id}/leave`, third)).statusCode).toBe(204);
+    const keys = (await messagesOf(e.conversationId, org)).map((m) => m.systemKey);
+    expect(keys).toEqual(['event.joined', 'event.cancelled']);
+  });
+
+  it('cover can\'t change after start or cancel', async () => {
+    const org = await register(app, 'Coverer');
+    await addCar(org);
+    const png = await noisePng(64, 64);
+    const put = (id: string) =>
+      app.inject({ method: 'PUT', url: `/api/events/${id}/cover`, headers: { ...org.auth, 'content-type': 'image/png' }, payload: png });
+    const a = (await req('POST', '/api/events', org, eventBody(org, { title: 'Cover cancel' }))).json();
+    expect((await put(a.id)).statusCode).toBe(200);
+    await req('POST', `/api/events/${a.id}/cancel`, org, {});
+    expect((await put(a.id)).statusCode).toBe(409);
+    expect((await req('DELETE', `/api/events/${a.id}/cover`, org)).statusCode).toBe(409);
+    const b = (await req('POST', '/api/events', org, eventBody(org, { title: 'Cover started' }))).json();
+    await sql.query(`update events set starts_at = now() - interval '1 hour' where id = $1`, [b.id]);
+    expect((await put(b.id)).statusCode).toBe(409);
+  });
+});

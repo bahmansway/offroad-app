@@ -3,8 +3,9 @@ import { tokenStore, withLock } from './tokenStore';
 import { API_URL } from './config';
 import type {
   AuthResponse, Car, CarInput, CarSummary, CatalogBrand, CatalogModel, Clan, ClanInput, ClanMember, ClanRequest,
-  Conversation, Id, MeInput, Message, Mod, ModInput, PublicUser, RatingResult, ReportTarget, Spot, SpotInput,
-  SpotType, Trim, User, UserRef,
+  ClanInvite, Conversation, EventCreateInput, EventDetail, EventInput, EventParticipant, EventScope, EventSummary, Id,
+  MeInput, MemberRole, Message, Mod, ModInput, MyClanInvite, Pinned, PublicUser, RatingResult, ReportTarget, Spot,
+  SpotInput, SpotType, Trim, User, UserRef,
 } from './types';
 import { toArray } from './catalog';
 
@@ -89,6 +90,36 @@ export const api = {
   removeMember: (id: Id, userId: Id) => r<void>(`/api/clans/${enc(id)}/members/${enc(userId)}`, { method: 'DELETE' }),
   handOver: (id: Id, userId: Id) => r<Clan>(`/api/clans/${enc(id)}/leader`, { method: 'POST', body: { userId } }),
 
+  // v3 clan officers, invites, events
+  setMemberRole: (id: Id, userId: Id, role: Exclude<MemberRole, 'leader'>) =>
+    r<{ userId: Id; role: MemberRole }>(`/api/clans/${enc(id)}/members/${enc(userId)}/role`, { method: 'POST', body: { role } }),
+  clanEvents: (id: Id) => r<{ items: EventSummary[] }>(`/api/clans/${enc(id)}/events`),
+  inviteToClan: (id: Id, userId: Id) => r<unknown>(`/api/clans/${enc(id)}/invites`, { method: 'POST', body: { userId } }),
+  clanInvites: (id: Id) => r<{ items: ClanInvite[] }>(`/api/clans/${enc(id)}/invites`),
+  revokeInvite: (id: Id, inviteId: Id) => r<void>(`/api/clans/${enc(id)}/invites/${enc(inviteId)}`, { method: 'DELETE' }),
+  myClanInvites: () => r<{ items: MyClanInvite[] }>('/api/me/clan-invites'),
+  acceptInvite: (inviteId: Id) => r<Clan>(`/api/clan-invites/${enc(inviteId)}/accept`, { method: 'POST' }),
+  declineInvite: (inviteId: Id) => r<void>(`/api/clan-invites/${enc(inviteId)}/decline`, { method: 'POST' }),
+
+  // events
+  events: (q: { scope?: EventScope; clanOnly?: boolean; near?: string; radiusKm?: number; limit?: number; cursor?: string | null } = {}) =>
+    r<{ items: EventSummary[]; nextCursor: string | null }>('/api/events', {
+      query: { ...q, clanOnly: q.clanOnly ? 'true' : undefined, cursor: q.cursor ?? undefined },
+    }),
+  event: (id: Id) => r<EventDetail>(`/api/events/${enc(id)}`),
+  createEvent: (b: EventCreateInput) => r<EventDetail>('/api/events', { method: 'POST', body: b }),
+  updateEvent: (id: Id, b: Partial<EventInput>) => r<EventDetail>(`/api/events/${enc(id)}`, { method: 'PATCH', body: b }),
+  cancelEvent: (id: Id, reason: string | null) =>
+    r<EventDetail>(`/api/events/${enc(id)}/cancel`, { method: 'POST', body: reason ? { reason } : {} }),
+  joinEvent: (id: Id, carId: Id, seats: number) =>
+    r<EventDetail>(`/api/events/${enc(id)}/join`, { method: 'POST', body: { carId, seats } }),
+  leaveEvent: (id: Id) => r<void>(`/api/events/${enc(id)}/leave`, { method: 'POST' }),
+  eventParticipants: (id: Id) => r<{ items: EventParticipant[] }>(`/api/events/${enc(id)}/participants`),
+  removeParticipant: (id: Id, userId: Id) => r<void>(`/api/events/${enc(id)}/participants/${enc(userId)}`, { method: 'DELETE' }),
+  uploadEventCover: (id: Id, data: Uint8Array, contentType = 'image/jpeg') =>
+    r<{ coverUrl: string | null }>(`/api/events/${enc(id)}/cover`, { method: 'PUT', binary: { data, contentType } }),
+  deleteEventCover: (id: Id) => r<void>(`/api/events/${enc(id)}/cover`, { method: 'DELETE' }),
+
   // chat
   conversations: () => r<Conversation[]>('/api/conversations'),
   conversation: (id: Id) => r<Conversation>(`/api/conversations/${enc(id)}`),
@@ -98,6 +129,13 @@ export const api = {
   sendMessage: (id: Id, text: string, clientId: string) =>
     r<Message>(`/api/conversations/${enc(id)}/messages`, { method: 'POST', body: { text, clientId } }),
   markRead: (id: Id) => r<void>(`/api/conversations/${enc(id)}/read`, { method: 'POST' }),
+  unreadTotal: () => r<{ total: number }>('/api/conversations/unread'),
+  deleteMessage: (id: Id, messageId: Id) =>
+    r<void>(`/api/conversations/${enc(id)}/messages/${enc(messageId)}`, { method: 'DELETE' }),
+  pin: (id: Id, messageId: Id) => r<{ pinned: Pinned }>(`/api/conversations/${enc(id)}/pin`, { method: 'PUT', body: { messageId } }),
+  unpin: (id: Id) => r<void>(`/api/conversations/${enc(id)}/pin`, { method: 'DELETE' }),
+  mute: (id: Id) => r<{ muted: boolean }>(`/api/conversations/${enc(id)}/mute`, { method: 'PUT' }),
+  unmute: (id: Id) => r<{ muted: boolean }>(`/api/conversations/${enc(id)}/mute`, { method: 'DELETE' }),
 
   // safety
   block: (userId: Id) => r<void>(`/api/users/${enc(userId)}/block`, { method: 'POST' }),

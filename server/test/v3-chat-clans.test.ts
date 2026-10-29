@@ -277,7 +277,17 @@ describe('clan invites (acceptance check 5)', () => {
     await req('POST', '/api/clans', other, { name: 'Other Clan', tag: 'OTH', isOpen: false });
     const otherClan = (await req('GET', '/api/clans?q=Other', other)).json().items[0].id;
     await req('POST', `/api/clans/${otherClan}/invites`, other, { userId: invitee.user.id });
-    const inv2 = (await req('POST', `/api/clans/${clanId}/invites`, leader, { userId: invitee.user.id })).json();
+    // declined -> 24 h cooldown before the same clan can invite again
+    const again = await req('POST', `/api/clans/${clanId}/invites`, leader, { userId: invitee.user.id });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error.message).toMatch(/declined/);
+    expect((await req('GET', '/api/me/clan-invites', invitee)).json().items.map((i: any) => i.clan.id)).not.toContain(clanId);
+    expect((await req('GET', `/api/clans/${clanId}/invites`, leader)).json().items.map((i: any) => i.user.id)).not.toContain(invitee.user.id);
+    expect((await req('DELETE', `/api/clans/${clanId}/invites/${inv.id}`, leader)).statusCode).toBe(404);
+    await sql.query(`update clan_invites set declined_at = now() - interval '25 hours' where id = $1`, [inv.id]);
+    const inv2r = await req('POST', `/api/clans/${clanId}/invites`, leader, { userId: invitee.user.id });
+    expect(inv2r.statusCode).toBe(201);
+    const inv2 = inv2r.json();
     const r = await req('POST', `/api/clan-invites/${inv2.id}/accept`, invitee);
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ id: clanId, myRole: 'member' });
@@ -488,5 +498,33 @@ describe('event chat', () => {
     await req('POST', `/api/cars/${car}/mods`, o, { name: 'Winch', category: 'recovery', price: 900, pricePublic: false });
     expect((await req('GET', `/api/cars/${car}`, v)).json().mods[0].price).toBeNull();
     expect((await req('GET', `/api/cars/${car}`, o)).json().mods[0].price).toBe(900);
+  });
+});
+
+// ---------------- review fixes ----------------
+
+describe('review fixes: chat + clans', () => {
+  it('pin socket event skips members who blocked the author (they get pinned:null)', async () => {
+    const lead = await register(app, 'PinLead');
+    const author = await register(app, 'PinAuthor');
+    const blocker = await register(app, 'PinBlocker');
+    const plain = await register(app, 'PinPlain');
+    const clan = (await req('POST', '/api/clans', lead, { name: 'Pin Testers', tag: 'PIN' })).json();
+    for (const u of [author, blocker, plain]) await req('POST', `/api/clans/${clan.id}/join`, u);
+    await req('POST', `/api/users/${author.user.id}/block`, blocker);
+    const sb = await connect(blocker.accessToken);
+    const sp = await connect(plain.accessToken);
+    const gotB: any[] = [];
+    const gotP: any[] = [];
+    sb.on('conversation:pinned', (x) => gotB.push(x));
+    sp.on('conversation:pinned', (x) => gotP.push(x));
+    const m = (await req('POST', `/api/conversations/${clan.conversationId}/messages`, author, { text: 'Secret meeting spot' })).json();
+    expect((await req('PUT', `/api/conversations/${clan.conversationId}/pin`, lead, { messageId: m.id })).statusCode).toBe(200);
+    await until(() => gotP.length === 1 && gotB.length === 1);
+    expect(gotP[0].pinned.message.text).toBe('Secret meeting spot');
+    expect(gotB[0]).toEqual({ conversationId: clan.conversationId, pinned: null });
+    await wait(100);
+    expect(gotB).toHaveLength(1);
+    expect((await req('GET', `/api/conversations/${clan.conversationId}`, blocker)).json().pinned).toBeNull();
   });
 });

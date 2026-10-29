@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import { eq, sql } from 'drizzle-orm';
 import { images } from '../db/schema.js';
-import type { Db } from '../db/index.js';
+import type { Db, Tx } from '../db/index.js';
 import { AppError, badRequest, conflict } from './errors.js';
 
 // One image at a time per process: keeps memory low on the small Railway instance.
@@ -61,7 +61,17 @@ export async function processImage(input: unknown, kind: ImageKind) {
  * count against the quota).
  */
 export async function storeImage(db: Db, ownerId: string, kind: ImageKind, body: unknown, replacing?: string | null) {
-  const p = await processImage(body, kind);
+  return saveImage(db, ownerId, kind, await processImage(body, kind), replacing);
+}
+
+/** Quota check + insert of an already processed image. Works inside a transaction too. */
+export async function saveImage(
+  db: Db | Tx,
+  ownerId: string,
+  kind: ImageKind,
+  p: Awaited<ReturnType<typeof processImage>>,
+  replacing?: string | null,
+) {
   const [used] = await db
     .select({ n: sql<number>`coalesce(sum(${images.bytes}), 0)::int` })
     .from(images)
