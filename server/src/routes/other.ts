@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
-import { users, spots, cars, reports, clans, messages, conversationMembers, REPORT_TARGETS } from '../db/schema.js';
+import { users, spots, cars, reports, clans, messages, conversationMembers, events, REPORT_TARGETS } from '../db/schema.js';
+import { visibleSql } from './events.js';
 import { notFound, parse } from '../lib/errors.js';
 
 const reportSchema = z
@@ -35,6 +36,14 @@ export async function otherRoutes(app: FastifyInstance) {
           .where(eq(messages.id, b.targetId))
           .limit(1);
         exists = !!m;
+      } else if (b.targetType === 'event') {
+        // clan-only events can only be reported by people who can see them
+        const [e] = await db
+          .select({ id: events.id })
+          .from(events)
+          .where(and(eq(events.id, b.targetId), visibleSql(req.userId)))
+          .limit(1);
+        exists = !!e;
       } else {
         const table = { spot: spots, car: cars, user: users, clan: clans }[b.targetType];
         const [target] = await db.select({ id: table.id }).from(table).where(eq(table.id, b.targetId)).limit(1);

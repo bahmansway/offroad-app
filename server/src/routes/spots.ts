@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
-import { spots, spotRatings, users } from '../db/schema.js';
+import { events, spots, spotRatings, users } from '../db/schema.js';
+import { upcomingEvents } from './events.js';
 import { forbidden, idParam, notFound, parse } from '../lib/errors.js';
 import { ratingSchema, round1 } from '../lib/common.js';
 import { makeLimiter } from '../lib/limits.js';
@@ -149,7 +150,11 @@ export async function spotRoutes(app: FastifyInstance) {
     const id = idParam(req.params);
     const row = await loadSpot(id);
     if (!row) throw notFound('Spot not found');
-    return { ...toSpot(row), myRating: await myRating(id, req.userId) };
+    return {
+      ...toSpot(row),
+      myRating: await myRating(id, req.userId),
+      upcomingEvents: await upcomingEvents(db, eq(events.spotId, id), req.userId, 5),
+    };
   });
 
   app.post('/spots', { preHandler: [app.authenticate, createLimit] }, async (req, reply) => {

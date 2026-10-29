@@ -15,6 +15,13 @@
       "when": 1793199359760,
       "tag": "0001_v2_profiles_clans_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793218094490,
+      "tag": "0002_v3_events_chat_extras",
+      "breakpoints": true
     }
   ]
 }

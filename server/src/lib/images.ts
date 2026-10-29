@@ -13,8 +13,8 @@ export const USER_IMAGE_QUOTA_BYTES = 20 * 1024 * 1024;
 /** Content types accepted for upload bodies. The real type is always sniffed from the bytes. */
 export const UPLOAD_CONTENT_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/octet-stream'];
 
-export type ImageKind = 'avatar' | 'car' | 'clan';
-const MAX_SIDE: Record<ImageKind, number> = { avatar: 512, car: 1024, clan: 512 };
+export type ImageKind = 'avatar' | 'car' | 'clan' | 'event';
+const MAX_SIDE: Record<ImageKind, number> = { avatar: 512, car: 1024, clan: 512, event: 1024 };
 
 export const imageUrl = (id: string | null | undefined) => (id ? `/api/images/${id}` : null);
 

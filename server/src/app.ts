@@ -20,6 +20,7 @@ import { catalogRoutes } from './routes/catalog.js';
 import { profileRoutes } from './routes/profile.js';
 import { chatRoutes } from './routes/chat.js';
 import { clanRoutes } from './routes/clans.js';
+import { eventRoutes } from './routes/events.js';
 import { createRealtime, type Realtime } from './lib/realtime.js';
 import { UPLOAD_CONTENT_TYPES } from './lib/images.js';
 
@@ -149,6 +150,7 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
       await api.register(profileRoutes);
       await api.register(chatRoutes);
       await api.register(clanRoutes);
+      await api.register(eventRoutes);
       api.setNotFoundHandler((_req, reply) => {
         reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
       });

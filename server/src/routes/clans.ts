@@ -1,16 +1,23 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm';
-import { clanMembers, clanRequests, clans, conversations, users } from '../db/schema.js';
-import type { Db } from '../db/index.js';
-import { conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
+import { and, asc, desc, eq, gt, ilike, inArray, lte, or, sql } from 'drizzle-orm';
+import { clanInvites, clanMembers, clanRequests, clans, conversations, events, users } from '../db/schema.js';
+import type { Db, Tx } from '../db/index.js';
+import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
 import { deleteImage, imageUrl, MAX_UPLOAD_BYTES, storeImage } from '../lib/images.js';
 import { makeLimiter } from '../lib/limits.js';
-import { isForeignKeyViolation, isUniqueViolation, userRef, userRefCols } from '../lib/users.js';
+import { eitherBlocked, isForeignKeyViolation, isUniqueViolation, userRef, userRefCols } from '../lib/users.js';
 import { addConversationMember, removeConversationMembers } from './chat.js';
+import { upcomingEvents } from './events.js';
 
 type ClanRow = typeof clans.$inferSelect;
-type Role = 'leader' | 'member' | 'pending' | null;
+type MemberRole = 'leader' | 'officer' | 'member';
+type Role = MemberRole | 'pending' | null;
+
+export const CLAN_MEMBER_CAP = 200;
+export const MAX_PENDING_INVITES = 30;
+export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const isStaff = (r: Role) => r === 'leader' || r === 'officer';
 
 const name = z.string().trim().min(3).max(40);
 const tag = z
@@ -48,6 +55,8 @@ const patchSchema = z
   .strict();
 const listQuery = z.object({ q: z.string().trim().max(40).optional() });
 const leaderSchema = z.object({ userId: z.uuid() }).strict();
+const roleSchema = z.object({ role: z.enum(['officer', 'member']) }).strict();
+const inviteSchema = z.object({ userId: z.uuid() }).strict();
 
 const nameTakenError = (err: unknown) => {
   if (isUniqueViolation(err, 'clans_name_key_idx')) return conflict('A clan with this name already exists');
@@ -98,7 +107,7 @@ async function toClan(db: Db, c: ClanRow, viewerId: string | null, memberCount?:
     memberCount,
     myRole: role,
     // only members get the chat id
-    conversationId: role === 'leader' || role === 'member' ? await clanConversationId(db, c.id) : null,
+    conversationId: role && role !== 'pending' ? await clanConversationId(db, c.id) : null,
     createdAt: c.createdAt.toISOString(),
   };
 }
@@ -107,6 +116,7 @@ export async function clanRoutes(app: FastifyInstance) {
   const db = app.db;
   const createLimit = makeLimiter(app, { max: app.config.rateLimits.create, timeWindow: '1 hour', key: (req) => `clan:${req.userId}` });
   const joinLimit = makeLimiter(app, { max: 30, timeWindow: '1 hour', key: (req) => `clanjoin:${req.userId}` });
+  const inviteLimit = makeLimiter(app, { max: 60, timeWindow: '1 hour', key: (req) => `claninvite:${req.userId}` });
   const logoLimit = makeLimiter(app, {
     max: app.config.rateLimits.create,
     timeWindow: '1 hour',
@@ -123,23 +133,53 @@ export async function clanRoutes(app: FastifyInstance) {
     if (c.leaderId !== userId) throw forbidden('Only the clan leader can do this');
     return c;
   };
-  /** Add a user to a clan + its chat. Throws 409 if they are already in a clan (DB-enforced). */
-  const addMember = async (clanId: string, userId: string) => {
-    try {
-      await db.transaction(async (tx) => {
-        await tx.insert(clanMembers).values({ userId, clanId, role: 'member' });
-        // joined: drop every pending request this user had
-        await tx.delete(clanRequests).where(eq(clanRequests.userId, userId));
-      });
-    } catch (err) {
-      if (isUniqueViolation(err, 'clan_members_pkey')) throw conflict('This user is already in a clan');
-      if (isForeignKeyViolation(err)) throw notFound('Clan not found'); // deleted meanwhile
-      throw err;
-    }
+  /**
+   * Insert a member. The caller's transaction must hold the clan row lock (`lockClan`), so the member cap
+   * can't be raced. One clan per user is enforced by the database (user_id primary key) -> 409.
+   * Call `joinChat` after the transaction commits.
+   */
+  const insertMember = async (tx: Tx, clanId: string, userId: string) => {
+    const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(clanMembers).where(eq(clanMembers.clanId, clanId));
+    if (n.n >= CLAN_MEMBER_CAP) throw conflict(`This clan is full (${CLAN_MEMBER_CAP} members)`);
+    const [already] = await tx.select({ clanId: clanMembers.clanId }).from(clanMembers).where(eq(clanMembers.userId, userId));
+    if (already) throw conflict('This user is already in a clan');
+    await tx.insert(clanMembers).values({ userId, clanId, role: 'member' });
+    // joined: drop every pending request and invite this user had
+    await tx.delete(clanRequests).where(eq(clanRequests.userId, userId));
+    await tx.delete(clanInvites).where(eq(clanInvites.userId, userId));
+  };
+  const joinChat = async (clanId: string, userId: string) => {
     const convId = await clanConversationId(db, clanId);
     if (convId) await addConversationMember(app, db, convId, userId);
   };
-  type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+  /** Run fn in a transaction that holds the clan row lock. Maps races to 404 / 409. */
+  const lockClan = async <T>(clanId: string, fn: (tx: Tx, clan: ClanRow) => Promise<T>) => {
+    try {
+      return await db.transaction(async (tx) => {
+        const [c] = await tx.select().from(clans).where(eq(clans.id, clanId)).for('update').limit(1);
+        if (!c) throw notFound('Clan not found');
+        return fn(tx, c);
+      });
+    } catch (err) {
+      if (isUniqueViolation(err, 'clan_members_pkey')) throw conflict('This user is already in a clan');
+      if (isForeignKeyViolation(err)) throw notFound('Not found'); // user or clan deleted meanwhile
+      throw err;
+    }
+  };
+  const roleIn = async (tx: Tx | Db, clanId: string, userId: string) => {
+    const [m] = await tx
+      .select({ role: clanMembers.role })
+      .from(clanMembers)
+      .where(and(eq(clanMembers.userId, userId), eq(clanMembers.clanId, clanId)));
+    return (m?.role ?? null) as MemberRole | null;
+  };
+  /** Like asLeader, for actions leader AND officers may do. Passes the caller's role. */
+  const asStaff = async <T>(clanId: string, userId: string, fn: (tx: Tx, clan: ClanRow, role: MemberRole) => Promise<T>) =>
+    lockClan(clanId, async (tx, c) => {
+      const role = await roleIn(tx, clanId, userId);
+      if (role !== 'leader' && role !== 'officer') throw forbidden('Only the clan leader or an officer can do this');
+      return fn(tx, c, role);
+    });
   /**
    * Run `fn` in a transaction holding a row lock on the clan, after checking the caller is still the
    * leader. Serialises leader actions (handover, removal, delete) so two can't interleave.
@@ -151,11 +191,14 @@ export async function clanRoutes(app: FastifyInstance) {
       if (c.leaderId !== userId) throw forbidden('Only the clan leader can do this');
       return fn(tx, c);
     });
-  /** Remove a plain member (never the leader). Returns false when there was no such member row. */
-  const removeMember = async (clanId: string, userId: string, tx: Tx | Db = db) => {
+  /**
+   * Remove a member whose role is one of `roles` (never the leader). Returns false when there was no such
+   * member row (conditional delete, so a concurrent promotion to leader can't be removed).
+   */
+  const removeMember = async (clanId: string, userId: string, tx: Tx | Db = db, roles: MemberRole[] = ['member', 'officer']) => {
     const removed = await tx
       .delete(clanMembers)
-      .where(and(eq(clanMembers.clanId, clanId), eq(clanMembers.userId, userId), eq(clanMembers.role, 'member')))
+      .where(and(eq(clanMembers.clanId, clanId), eq(clanMembers.userId, userId), inArray(clanMembers.role, roles)))
       .returning({ userId: clanMembers.userId });
     return removed.length > 0;
   };
@@ -255,8 +298,10 @@ export async function clanRoutes(app: FastifyInstance) {
     const c = await loadClan(id);
     const [mine] = await db.select({ clanId: clanMembers.clanId }).from(clanMembers).where(eq(clanMembers.userId, me));
     if (mine) throw conflict(mine.clanId === id ? 'You are already in this clan' : 'You are already in a clan');
-    if (c.isOpen) await addMember(id, me);
-    else await db.insert(clanRequests).values({ clanId: id, userId: me }).onConflictDoNothing();
+    if (c.isOpen) {
+      await lockClan(id, (tx) => insertMember(tx, id, me));
+      await joinChat(id, me);
+    } else await db.insert(clanRequests).values({ clanId: id, userId: me }).onConflictDoNothing();
     return toClan(db, c, me);
   });
 
@@ -267,8 +312,8 @@ export async function clanRoutes(app: FastifyInstance) {
     const c = await loadClan(id);
     const role = await myRole(db, id, me);
     if (role === 'leader') throw conflict('Hand over leadership first, or delete the clan if you are the only member');
-    if (role === 'member') {
-      // conditional on role='member': if they were just made leader, this removes nothing
+    if (role === 'member' || role === 'officer') {
+      // conditional on role member/officer: if they were just made leader, this removes nothing
       if (!(await removeMember(id, me))) {
         // changed meanwhile: promoted to leader, or already removed
         if ((await myRole(db, id, me)) === 'leader') throw conflict('Hand over leadership first, or delete the clan if you are the only member');
@@ -289,14 +334,19 @@ export async function clanRoutes(app: FastifyInstance) {
       .from(clanMembers)
       .innerJoin(users, eq(users.id, clanMembers.userId))
       .where(eq(clanMembers.clanId, id))
-      .orderBy(sql`case when ${clanMembers.role} = 'leader' then 0 else 1 end`, asc(clanMembers.joinedAt))
+      .orderBy(sql`case ${clanMembers.role} when 'leader' then 0 when 'officer' then 1 else 2 end`, asc(clanMembers.joinedAt))
       .limit(1000);
     return { items: rows.map((r) => ({ user: userRef(r), role: r.role, joinedAt: r.joinedAt.toISOString() })) };
   });
 
+  const requireStaff = async (clanId: string, userId: string) => {
+    await loadClan(clanId);
+    if (!isStaff(await roleIn(db, clanId, userId))) throw forbidden('Only the clan leader or an officer can do this');
+  };
+
   app.get('/clans/:id/requests', { preHandler: app.authenticate }, async (req) => {
     const id = idParam(req.params);
-    await loadLed(id, req.userId!);
+    await requireStaff(id, req.userId!);
     const rows = await db
       .select({ ...userRefCols, createdAt: clanRequests.createdAt })
       .from(clanRequests)
@@ -306,8 +356,8 @@ export async function clanRoutes(app: FastifyInstance) {
     return { items: rows.map((r) => ({ user: userRef(r), createdAt: r.createdAt.toISOString() })) };
   });
 
-  const loadRequest = async (clanId: string, userId: string) => {
-    const [r] = await db
+  const loadRequest = async (clanId: string, userId: string, tx: Tx | Db = db) => {
+    const [r] = await tx
       .select({ x: clanRequests.userId })
       .from(clanRequests)
       .where(and(eq(clanRequests.clanId, clanId), eq(clanRequests.userId, userId)));
@@ -317,24 +367,29 @@ export async function clanRoutes(app: FastifyInstance) {
   app.post('/clans/:id/requests/:userId/approve', { preHandler: app.authenticate }, async (req, reply) => {
     const id = idParam(req.params);
     const userId = idParam(req.params, 'userId');
-    await loadLed(id, req.userId!);
-    await loadRequest(id, userId);
     try {
-      await addMember(id, userId);
-    } catch (err) {
+      await asStaff(id, req.userId!, async (tx) => {
+        await loadRequest(id, userId, tx);
+        await insertMember(tx, id, userId);
+      });
+    } catch (err: any) {
       // they joined another clan meanwhile: the request is stale
-      await db.delete(clanRequests).where(and(eq(clanRequests.clanId, id), eq(clanRequests.userId, userId)));
+      if (err?.statusCode === 409 && /already in a clan/.test(err.message)) {
+        await db.delete(clanRequests).where(and(eq(clanRequests.clanId, id), eq(clanRequests.userId, userId)));
+      }
       throw err;
     }
+    await joinChat(id, userId);
     return reply.status(204).send();
   });
 
   app.post('/clans/:id/requests/:userId/reject', { preHandler: app.authenticate }, async (req, reply) => {
     const id = idParam(req.params);
     const userId = idParam(req.params, 'userId');
-    await loadLed(id, req.userId!);
-    await loadRequest(id, userId);
-    await db.delete(clanRequests).where(and(eq(clanRequests.clanId, id), eq(clanRequests.userId, userId)));
+    await asStaff(id, req.userId!, async (tx) => {
+      await loadRequest(id, userId, tx);
+      await tx.delete(clanRequests).where(and(eq(clanRequests.clanId, id), eq(clanRequests.userId, userId)));
+    });
     return reply.status(204).send();
   });
 
@@ -342,11 +397,22 @@ export async function clanRoutes(app: FastifyInstance) {
     const id = idParam(req.params);
     const userId = idParam(req.params, 'userId');
     if (userId === req.userId) {
-      await loadLed(id, req.userId!);
-      throw conflict('The leader cannot remove themselves; hand over leadership first');
+      const r = await roleIn(db, id, req.userId!);
+      if (r === 'leader') throw conflict('The leader cannot remove themselves; hand over leadership first');
+      if (r === 'officer') throw conflict('Use leave to leave the clan');
+      await requireStaff(id, req.userId!);
     }
-    const removed = await asLeader(id, req.userId!, (tx) => removeMember(id, userId, tx));
-    if (!removed) throw notFound('Member not found');
+    await asStaff(id, req.userId!, async (tx, _c, myRole) => {
+      const target = await roleIn(tx, id, userId);
+      if (!target) throw notFound('Member not found');
+      // officers remove plain members only; the leader can't be removed by anyone
+      if (target === 'leader' || (myRole === 'officer' && target === 'officer')) {
+        throw forbidden(myRole === 'officer' ? 'Officers can only remove members' : 'The leader cannot be removed');
+      }
+      if (!(await removeMember(id, userId, tx, myRole === 'leader' ? ['member', 'officer'] : ['member']))) {
+        throw notFound('Member not found');
+      }
+    });
     await dropFromChat(id, userId);
     return reply.status(204).send();
   });
@@ -364,7 +430,7 @@ export async function clanRoutes(app: FastifyInstance) {
       const promoted = await tx
         .update(clanMembers)
         .set({ role: 'leader' })
-        .where(and(eq(clanMembers.clanId, id), eq(clanMembers.userId, userId), eq(clanMembers.role, 'member')))
+        .where(and(eq(clanMembers.clanId, id), eq(clanMembers.userId, userId), inArray(clanMembers.role, ['member', 'officer'])))
         .returning({ u: clanMembers.userId });
       if (promoted.length !== 1) throw notFound('Member not found');
       const demoted = await tx
@@ -380,5 +446,157 @@ export async function clanRoutes(app: FastifyInstance) {
       if (demoted.length !== 1 || moved.length !== 1) throw conflict('Leadership changed meanwhile, try again');
     });
     return toClan(db, await loadClan(id), req.userId);
+  });
+
+  // ---- officers (leader only) ----
+  app.post('/clans/:id/members/:userId/role', { preHandler: app.authenticate }, async (req) => {
+    const id = idParam(req.params);
+    const userId = idParam(req.params, 'userId');
+    const { role } = parse(roleSchema, req.body);
+    if (userId === req.userId) {
+      await loadLed(id, req.userId!);
+      throw conflict('The leader keeps the leader role; use handover instead');
+    }
+    await asLeader(id, req.userId!, async (tx) => {
+      const updated = await tx
+        .update(clanMembers)
+        .set({ role })
+        .where(and(eq(clanMembers.clanId, id), eq(clanMembers.userId, userId), inArray(clanMembers.role, ['member', 'officer'])))
+        .returning({ u: clanMembers.userId });
+      if (updated.length !== 1) throw notFound('Member not found');
+    });
+    return { userId, role };
+  });
+
+  // ---- upcoming events of the clan (clan-only ones only for members) ----
+  app.get('/clans/:id/events', async (req) => {
+    const id = idParam(req.params);
+    await loadClan(id);
+    return { items: await upcomingEvents(db, eq(events.clanId, id), req.userId, 20) };
+  });
+
+  // ---- invites ----
+  const pendingInvite = gt(clanInvites.expiresAt, sql`now()`);
+  const toInvite = (r: { inv: typeof clanInvites.$inferSelect; clan: ClanRow }) => ({
+    id: r.inv.id,
+    clan: { id: r.clan.id, name: r.clan.name, tag: r.clan.tag, logoUrl: imageUrl(r.clan.logoImageId) },
+    createdAt: r.inv.createdAt.toISOString(),
+    expiresAt: r.inv.expiresAt.toISOString(),
+  });
+
+  app.post('/clans/:id/invites', { preHandler: [app.authenticate, inviteLimit] }, async (req, reply) => {
+    const id = idParam(req.params);
+    const { userId } = parse(inviteSchema, req.body);
+    const me = req.userId!;
+    if (userId === me) throw badRequest('You cannot invite yourself');
+    const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
+    if (!u) throw notFound('User not found');
+    const inv = await asStaff(id, me, async (tx) => {
+      if (await eitherBlocked(db, me, userId)) throw forbidden('You cannot invite this user');
+      const [inClan] = await tx.select({ clanId: clanMembers.clanId }).from(clanMembers).where(eq(clanMembers.userId, userId));
+      if (inClan) throw conflict(inClan.clanId === id ? 'This user is already in your clan' : 'This user is already in a clan');
+      // expired invites don't count and can be replaced
+      await tx.delete(clanInvites).where(and(eq(clanInvites.clanId, id), lte(clanInvites.expiresAt, sql`now()`)));
+      const [dup] = await tx
+        .select({ id: clanInvites.id })
+        .from(clanInvites)
+        .where(and(eq(clanInvites.clanId, id), eq(clanInvites.userId, userId)));
+      if (dup) throw conflict('This user already has a pending invite');
+      const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(clanInvites).where(eq(clanInvites.clanId, id));
+      if (n.n >= MAX_PENDING_INVITES) throw conflict(`At most ${MAX_PENDING_INVITES} pending invites per clan`);
+      const [row] = await tx
+        .insert(clanInvites)
+        .values({ clanId: id, userId, invitedById: me, expiresAt: new Date(Date.now() + INVITE_TTL_MS) })
+        .returning();
+      return row;
+    });
+    const [inviter] = await db.select(userRefCols).from(users).where(eq(users.id, me));
+    const payload = { ...toInvite({ inv, clan: await loadClan(id) }), invitedBy: userRef(inviter) };
+    app.realtime.toUser(userId, 'clan:invite', payload);
+    return reply.status(201).send({ ...payload, user: { id: userId } });
+  });
+
+  app.get('/clans/:id/invites', { preHandler: app.authenticate }, async (req) => {
+    const id = idParam(req.params);
+    await requireStaff(id, req.userId!);
+    const rows = await db
+      .select({ inv: clanInvites, ...userRefCols })
+      .from(clanInvites)
+      .innerJoin(users, eq(users.id, clanInvites.userId))
+      .where(and(eq(clanInvites.clanId, id), pendingInvite))
+      .orderBy(desc(clanInvites.createdAt));
+    return {
+      items: rows.map((r) => ({
+        id: r.inv.id,
+        user: userRef(r),
+        invitedById: r.inv.invitedById,
+        createdAt: r.inv.createdAt.toISOString(),
+        expiresAt: r.inv.expiresAt.toISOString(),
+      })),
+    };
+  });
+
+  app.delete('/clans/:id/invites/:inviteId', { preHandler: app.authenticate }, async (req, reply) => {
+    const id = idParam(req.params);
+    const inviteId = idParam(req.params, 'inviteId');
+    await asStaff(id, req.userId!, async (tx) => {
+      const del = await tx
+        .delete(clanInvites)
+        .where(and(eq(clanInvites.id, inviteId), eq(clanInvites.clanId, id)))
+        .returning({ id: clanInvites.id });
+      if (!del.length) throw notFound('Invite not found');
+    });
+    return reply.status(204).send();
+  });
+
+  app.get('/me/clan-invites', { preHandler: app.authenticate }, async (req) => {
+    const rows = await db
+      .select({ inv: clanInvites, clan: clans, ...userRefCols })
+      .from(clanInvites)
+      .innerJoin(clans, eq(clans.id, clanInvites.clanId))
+      .leftJoin(users, eq(users.id, clanInvites.invitedById))
+      .where(and(eq(clanInvites.userId, req.userId!), pendingInvite))
+      .orderBy(desc(clanInvites.createdAt));
+    return {
+      items: rows.map((r) => ({
+        ...toInvite(r),
+        invitedBy: r.id ? userRef({ id: r.id, displayName: r.displayName!, avatarImageId: r.avatarImageId }) : null,
+      })),
+    };
+  });
+
+  /** Load my invite: 404 if missing / not mine; expired -> deleted + 409. */
+  const myInvite = async (tx: Tx | Db, inviteId: string, me: string) => {
+    const [inv] = await tx
+      .select()
+      .from(clanInvites)
+      .where(and(eq(clanInvites.id, inviteId), eq(clanInvites.userId, me)))
+      .limit(1);
+    if (!inv) throw notFound('Invite not found');
+    return inv;
+  };
+
+  app.post('/clan-invites/:id/accept', { preHandler: app.authenticate }, async (req) => {
+    const inviteId = idParam(req.params);
+    const me = req.userId!;
+    const inv = await myInvite(db, inviteId, me);
+    if (inv.expiresAt.getTime() <= Date.now()) {
+      await db.delete(clanInvites).where(eq(clanInvites.id, inviteId));
+      throw conflict('This invite has expired');
+    }
+    await lockClan(inv.clanId, async (tx) => {
+      await myInvite(tx, inviteId, me); // revoked meanwhile -> 404
+      await insertMember(tx, inv.clanId, me); // full / already in a clan -> 409 (invite kept)
+    });
+    await joinChat(inv.clanId, me);
+    return toClan(db, await loadClan(inv.clanId), me);
+  });
+
+  app.post('/clan-invites/:id/decline', { preHandler: app.authenticate }, async (req, reply) => {
+    const inviteId = idParam(req.params);
+    const me = req.userId!;
+    await myInvite(db, inviteId, me);
+    await db.delete(clanInvites).where(and(eq(clanInvites.id, inviteId), eq(clanInvites.userId, me)));
+    return reply.status(204).send();
   });
 }

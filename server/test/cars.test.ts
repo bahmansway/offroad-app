@@ -212,7 +212,7 @@ describe('cars & mods', () => {
     // id of a user reported as a spot -> not found
     expect((await app.inject({ method: 'POST', url: '/api/reports', headers: other.auth, payload: { targetType: 'spot', targetId: owner.user.id, reason: 'x' } })).statusCode).toBe(404);
     for (const payload of [
-      { targetType: 'event', targetId: owner.user.id, reason: 'x' },
+      { targetType: 'garage', targetId: owner.user.id, reason: 'x' },
       { targetType: 'user', targetId: 'abc', reason: 'x' },
       { targetType: 'user', targetId: owner.user.id, reason: '' },
       { targetType: 'user', targetId: owner.user.id, reason: 'x'.repeat(501) },

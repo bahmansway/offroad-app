@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   check,
   customType,
+  jsonb,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -169,7 +170,7 @@ export const mods = pgTable(
   (t) => [index('mods_car_idx').on(t.carId)],
 );
 
-export const REPORT_TARGETS = ['spot', 'car', 'user', 'message', 'clan'] as const;
+export const REPORT_TARGETS = ['spot', 'car', 'user', 'message', 'clan', 'event'] as const;
 
 export const reports = pgTable('reports', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -195,7 +196,7 @@ export const images = pgTable(
     ownerId: uuid('owner_id')
       .notNull()
       .references((): AnyPgColumn => users.id, { onDelete: 'cascade' }),
-    kind: text('kind', { enum: ['avatar', 'car', 'clan'] }).notNull(),
+    kind: text('kind', { enum: ['avatar', 'car', 'clan', 'event'] }).notNull(),
     mime: text('mime').notNull().default('image/jpeg'),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
@@ -230,6 +231,8 @@ export const clans = pgTable(
   ],
 );
 
+export const CLAN_ROLES = ['leader', 'officer', 'member'] as const;
+
 export const clanMembers = pgTable(
   'clan_members',
   {
@@ -240,7 +243,7 @@ export const clanMembers = pgTable(
     clanId: uuid('clan_id')
       .notNull()
       .references(() => clans.id, { onDelete: 'cascade' }),
-    role: text('role', { enum: ['leader', 'member'] }).notNull(),
+    role: text('role', { enum: CLAN_ROLES }).notNull(),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('clan_members_clan_idx').on(t.clanId)],
@@ -264,8 +267,12 @@ export const conversations = pgTable(
   'conversations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    type: text('type', { enum: ['dm', 'clan'] }).notNull(),
+    type: text('type', { enum: ['dm', 'clan', 'event'] }).notNull(),
     clanId: uuid('clan_id').references(() => clans.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').references((): AnyPgColumn => events.id, { onDelete: 'cascade' }),
+    pinnedMessageId: uuid('pinned_message_id').references((): AnyPgColumn => messages.id, { onDelete: 'set null' }),
+    pinnedById: uuid('pinned_by_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
+    pinnedAt: timestamp('pinned_at', { withTimezone: true }),
     /** "smallerUserId:largerUserId" for DMs, so each pair has exactly one conversation. */
     dmKey: text('dm_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -274,9 +281,10 @@ export const conversations = pgTable(
   (t) => [
     uniqueIndex('conversations_clan_idx').on(t.clanId),
     uniqueIndex('conversations_dm_key_idx').on(t.dmKey),
+    uniqueIndex('conversations_event_idx').on(t.eventId),
     check(
       'conversations_type_check',
-      sql`(${t.type} = 'dm' and ${t.dmKey} is not null and ${t.clanId} is null) or (${t.type} = 'clan' and ${t.clanId} is not null and ${t.dmKey} is null)`,
+      sql`(${t.type} = 'dm' and ${t.dmKey} is not null and ${t.clanId} is null and ${t.eventId} is null) or (${t.type} = 'clan' and ${t.clanId} is not null and ${t.dmKey} is null and ${t.eventId} is null) or (${t.type} = 'event' and ${t.eventId} is not null and ${t.dmKey} is null and ${t.clanId} is null)`,
     ),
   ],
 );
@@ -291,6 +299,8 @@ export const conversationMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Set while the user has muted this conversation (no unread badge). */
+    mutedAt: timestamp('muted_at', { withTimezone: true }),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.conversationId, t.userId] }), index('conversation_members_user_idx').on(t.userId)],
@@ -303,14 +313,23 @@ export const messages = pgTable(
     conversationId: uuid('conversation_id')
       .notNull()
       .references(() => conversations.id, { onDelete: 'cascade' }),
-    senderId: uuid('sender_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    /** null for system messages. */
+    senderId: uuid('sender_id').references(() => users.id, { onDelete: 'cascade' }),
+    type: text('type', { enum: ['user', 'system'] }).notNull().default('user'),
+    /** User text; for system messages an English fallback (apps render systemKey + systemParams). */
     text: text('text').notNull(),
+    systemKey: text('system_key'),
+    systemParams: jsonb('system_params').$type<Record<string, unknown>>(),
     clientId: text('client_id'),
+    /** Soft delete: text is kept for moderation but never returned by the API. */
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    check(
+      'messages_type_check',
+      sql`(${t.type} = 'user' and ${t.senderId} is not null) or (${t.type} = 'system' and ${t.systemKey} is not null)`,
+    ),
     index('messages_conv_created_idx').on(t.conversationId, t.createdAt),
     uniqueIndex('messages_client_id_idx').on(t.conversationId, t.senderId, t.clientId),
   ],
@@ -328,4 +347,93 @@ export const blocks = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] }), index('blocks_blocked_idx').on(t.blockedId)],
+);
+
+
+// ---------------- v3: clan invites, events ----------------
+
+export const clanInvites = pgTable(
+  'clan_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clanId: uuid('clan_id')
+      .notNull()
+      .references(() => clans.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    invitedById: uuid('invited_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex('clan_invites_clan_user_idx').on(t.clanId, t.userId), index('clan_invites_user_idx').on(t.userId)],
+);
+
+export const EVENT_VISIBILITY = ['public', 'clan'] as const;
+
+export const events = pgTable(
+  'events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizerId: uuid('organizer_id')
+      .notNull()
+      .references((): AnyPgColumn => users.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    description: text('description').notNull().default(''),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }),
+    spotId: uuid('spot_id').references((): AnyPgColumn => spots.id, { onDelete: 'set null' }),
+    meetingLat: doublePrecision('meeting_lat'),
+    meetingLng: doublePrecision('meeting_lng'),
+    meetingLabel: text('meeting_label'),
+    maxCars: integer('max_cars').notNull(),
+    minDifficulty: smallint('min_difficulty'),
+    requirements: text('requirements').array().notNull().default(sql`'{}'::text[]`),
+    visibility: text('visibility', { enum: EVENT_VISIBILITY }).notNull().default('public'),
+    /** Organizer's clan when the event was created (clan badge; required for visibility 'clan'). */
+    clanId: uuid('clan_id').references((): AnyPgColumn => clans.id, { onDelete: 'set null' }),
+    status: text('status', { enum: ['scheduled', 'cancelled'] }).notNull().default('scheduled'),
+    cancelReason: text('cancel_reason'),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    coverImageId: uuid('cover_image_id').references((): AnyPgColumn => images.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('events_starts_idx').on(t.startsAt),
+    index('events_organizer_idx').on(t.organizerId, t.createdAt),
+    index('events_spot_idx').on(t.spotId),
+    index('events_clan_idx').on(t.clanId),
+    check('events_max_cars_check', sql`${t.maxCars} between 2 and 100`),
+    check('events_visibility_check', sql`${t.visibility} in ('public','clan')`),
+    check('events_status_check', sql`${t.status} in ('scheduled','cancelled')`),
+  ],
+);
+
+export const PARTICIPANT_STATUSES = ['going', 'waitlist', 'removed'] as const;
+
+export const eventParticipants = pgTable(
+  'event_participants',
+  {
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** set null if the car is deleted later */
+    carId: uuid('car_id').references(() => cars.id, { onDelete: 'set null' }),
+    seats: smallint('seats').notNull().default(0),
+    /** removed = taken out by the organizer (kept so they can't rejoin; not a member of the chat). */
+    status: text('status', { enum: PARTICIPANT_STATUSES }).notNull(),
+    /** FIFO order for the waitlist */
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.userId] }),
+    index('event_participants_user_idx').on(t.userId),
+    index('event_participants_event_status_idx').on(t.eventId, t.status, t.joinedAt),
+    check('event_participants_status_check', sql`${t.status} in ('going','waitlist','removed')`),
+    check('event_participants_seats_check', sql`${t.seats} between 0 and 6`),
+  ],
 );

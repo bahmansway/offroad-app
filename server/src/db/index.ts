@@ -10,3 +10,5 @@ export function createDb(databaseUrl: string) {
 
 export type Db = ReturnType<typeof createDb>['db'];
 export { schema };
+/** A transaction handle (same query API as Db). */
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
