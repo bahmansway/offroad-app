@@ -1,7 +1,8 @@
 import {
-  addRequirement, canCancel, canLeave, canRemoveParticipants, cardBadge, dateBlock, defaultStart, eventConflictKey,
-  eventLevel, eventLocation, eventPayload, eventPhase, formatEventWhen, fromLocalInputValue, joinState, placeName,
-  placesLeft, splitParticipants, toLocalInputValue, toggleRequirement, validateEventForm, waitlistPosition,
+  addRequirement, bakuParts, bakuTime, canCancel, canLeave, canRemoveParticipants, cardBadge, combineBakuDateTime,
+  dateBlock, defaultStart, deviceOnBakuTime, eventConflictKey, eventLevel, eventLocation, eventPayload, eventPhase,
+  formatEventWhen, fromBakuInputValue, fromBakuParts, joinState, placeName, placesLeft, splitParticipants,
+  toBakuInputValue, toggleRequirement, validateEventForm, waitlistPosition, withZoneLabel,
   type EventFormState,
 } from '../eventLogic';
 import type { EventParticipant, EventSummary } from '../types';
@@ -121,27 +122,56 @@ describe('place, level, location', () => {
   });
 });
 
-describe('dates', () => {
+describe('dates (Baku time, whatever the device zone)', () => {
   const words = { weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] };
-  it('formats the date block and when line in local time', () => {
-    const start = new Date(2026, 10, 7, 9, 0);
-    expect(dateBlock(start.toISOString(), ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'])).toEqual({ day: '07', month: 'NOV' });
-    expect(formatEventWhen(start.toISOString(), null, words)).toBe('Sat, 7 November · 09:00');
-    expect(formatEventWhen(start.toISOString(), new Date(2026, 10, 7, 18, 30).toISOString(), words)).toBe('Sat, 7 November · 09:00 – 18:30');
-    expect(formatEventWhen(start.toISOString(), new Date(2026, 10, 8, 12, 0).toISOString(), words)).toBe('Sat, 7 November · 09:00 – Sun, 8 November · 12:00');
+  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  it('09:00 in Baku is 05:00 UTC (UTC+4, no daylight saving)', () => {
+    const d = fromBakuParts(2026, 10, 7, 9, 0);
+    expect(d.toISOString()).toBe('2026-11-07T05:00:00.000Z');
+    // summer too: Azerbaijan has no DST
+    expect(fromBakuParts(2026, 6, 1, 9, 0).toISOString()).toBe('2026-07-01T05:00:00.000Z');
+    expect(bakuParts(new Date('2026-11-07T05:00:00.000Z'))).toEqual({ year: 2026, month: 10, day: 7, hour: 9, minute: 0, weekday: 6 });
   });
-  it('round-trips the web datetime-local value', () => {
-    const d = new Date(2026, 10, 7, 9, 5);
-    expect(toLocalInputValue(d)).toBe('2026-11-07T09:05');
-    expect(fromLocalInputValue('2026-11-07T09:05')?.getTime()).toBe(d.getTime());
-    expect(fromLocalInputValue('')).toBeNull();
-    expect(fromLocalInputValue('nope')).toBeNull();
+  it('late-evening UTC moves to the next Baku day', () => {
+    const p = bakuParts(new Date('2026-12-31T21:30:00.000Z'));
+    expect([p.year, p.month, p.day, p.hour, p.minute]).toEqual([2027, 0, 1, 1, 30]);
+    expect(dateBlock('2026-12-31T21:30:00.000Z', MONTHS)).toEqual({ day: '01', month: 'JAN' });
+    expect(bakuTime('2026-12-31T21:30:00.000Z')).toBe('01:30');
   });
-  it('default start is a Saturday 09:00 at least a day ahead', () => {
-    const d = defaultStart(new Date(2026, 9, 30, 20, 0)); // Friday evening
-    expect(d.getDay()).toBe(6);
-    expect(d.getHours()).toBe(9);
-    expect(d.getTime() - new Date(2026, 9, 30, 20, 0).getTime()).toBeGreaterThanOrEqual(24 * 3600 * 1000);
+  it('formats the date block and when line in Baku time', () => {
+    const start = '2026-11-07T05:00:00.000Z';
+    expect(dateBlock(start, MONTHS)).toEqual({ day: '07', month: 'NOV' });
+    expect(formatEventWhen(start, null, words)).toBe('Sat, 7 November · 09:00');
+    expect(formatEventWhen(start, '2026-11-07T14:30:00.000Z', words)).toBe('Sat, 7 November · 09:00 – 18:30');
+    expect(formatEventWhen(start, '2026-11-08T08:00:00.000Z', words)).toBe('Sat, 7 November · 09:00 – Sun, 8 November · 12:00');
+  });
+  it('web input values are Baku wall-clock time and round-trip', () => {
+    const d = new Date('2026-11-07T05:05:00.000Z');
+    expect(toBakuInputValue(d)).toBe('2026-11-07T09:05');
+    expect(fromBakuInputValue('2026-11-07T09:05')?.toISOString()).toBe('2026-11-07T05:05:00.000Z');
+    expect(fromBakuInputValue('2026-11-07T09:05:00')?.toISOString()).toBe('2026-11-07T05:05:00.000Z');
+    expect(fromBakuInputValue('')).toBeNull();
+    expect(fromBakuInputValue('nope')).toBeNull();
+    expect(fromBakuInputValue('2026-13-01T09:00')).toBeNull();
+  });
+  it('Android: Baku date from the first dialog + Baku time from the second', () => {
+    const datePick = new Date('2026-11-06T22:00:00.000Z'); // 7 Nov 02:00 in Baku
+    const timePick = new Date('2026-10-29T14:15:00.000Z'); // 18:15 in Baku
+    expect(combineBakuDateTime(datePick, timePick).toISOString()).toBe('2026-11-07T14:15:00.000Z');
+  });
+  it('default start is a Saturday 09:00 Baku time at least a day ahead', () => {
+    const now = new Date('2026-10-30T16:00:00.000Z'); // Friday 20:00 in Baku
+    const d = defaultStart(now);
+    expect(d.toISOString()).toBe('2026-11-07T05:00:00.000Z');
+    expect(defaultStart(new Date('2026-10-29T08:00:00.000Z')).toISOString()).toBe('2026-10-31T05:00:00.000Z');
+  });
+  it('device zone label: none on Baku devices, "Baku time" elsewhere (e.g. Poland)', () => {
+    expect(deviceOnBakuTime('Asia/Baku')).toBe(true);
+    expect(deviceOnBakuTime('Europe/Warsaw')).toBe(false);
+    expect(deviceOnBakuTime(null, -240)).toBe(true);
+    expect(deviceOnBakuTime(null, -60)).toBe(false);
+    expect(withZoneLabel('Sat · 09:00', 'Baku time', false)).toBe('Sat · 09:00 (Baku time)');
+    expect(withZoneLabel('Sat · 09:00', 'Bakı vaxtı', true)).toBe('Sat · 09:00');
   });
 });
 

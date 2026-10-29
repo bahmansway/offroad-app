@@ -15,6 +15,7 @@ const PAGE = 20;
 export default function EventsTab() {
   const { t } = useI18n();
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const chat = useChat();
   const [scope, setScope] = useState<EventScope>('upcoming');
   const [items, setItems] = useState<EventSummary[] | null>(null);
@@ -30,7 +31,7 @@ export default function EventsTab() {
   const load = useCallback(async (s: EventScope) => {
     const id = ++seq.current;
     setError(null);
-    if (s === 'mine' && !user) {
+    if (s === 'mine' && !userId) {
       setItems([]);
       setCursor(null);
       return;
@@ -43,7 +44,18 @@ export default function EventsTab() {
     } catch (e) {
       if (id === seq.current) setError(e);
     }
-  }, [user]);
+  }, [userId]);
+
+  // another account (or logged out): never show the previous user's list, even for a moment
+  const firstUser = useRef(true);
+  useEffect(() => {
+    if (firstUser.current) { firstUser.current = false; return; }
+    seq.current++;
+    setItems(null);
+    setCursor(null);
+    setError(null);
+    load(scopeRef.current);
+  }, [userId, load]);
 
   useFocusEffect(useCallback(() => { load(scopeRef.current); }, [load]));
   useEffect(() => chat.on('eventUpdated', () => load(scopeRef.current)), [chat, load]);
@@ -103,7 +115,10 @@ export default function EventsTab() {
         <EmptyState icon="lock" title={t('events.loginMine')} actionLabel={t('common.login')} onAction={() => router.push('/login')} />
       ) : error && !items ? (
         <ErrorState message={errorMessage(error, t)} onRetry={() => load(scope)} />
-      ) : items === null ? (
+      ) : null}
+      {/* refresh / "show more" failed while an older list is on screen: say so above it */}
+      {error && items && !(scope === 'mine' && !user) ? <ErrorState message={errorMessage(error, t)} onRetry={() => load(scope)} /> : null}
+      {(scope === 'mine' && !user) || (error && !items) ? null : items === null ? (
         <LoadingState inline />
       ) : items.length === 0 ? (
         <EmptyState

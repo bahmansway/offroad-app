@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, ScrollView, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,7 +22,7 @@ import { sameId } from '../../lib/format';
 import { pickPhoto } from '../../lib/photos';
 import { successFeedback } from '../../lib/haptics';
 import {
-  badgeTone, canCancel, canLeave, canRemoveParticipants, cardBadge, eventLevel, eventLocation, formatEventWhen,
+  badgeTone, canCancel, canLeave, canRemoveParticipants, cardBadge, eventLevel, eventLocation, formatEventWhen, withZoneLabel,
   joinState, placeName, placesLeft, splitParticipants, waitlistPosition,
 } from '../../lib/eventLogic';
 import type { CarSummary, EventDetail, EventParticipant, Id, Spot } from '../../lib/types';
@@ -48,20 +48,44 @@ export default function EventScreen() {
   const [seats, setSeats] = useState(0);
   const [menuFor, setMenuFor] = useState<EventParticipant | null>(null);
 
+  /** only the newest load may fill the page (user switch, quick reloads) */
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const my = ++loadSeq.current;
     setLoadError(null);
     try {
       const [e, p] = await Promise.all([api.event(id), api.eventParticipants(id)]);
+      if (my !== loadSeq.current) return;
       setEv(e);
       setPeople(p.items);
       setGone(false);
     } catch (e) {
+      if (my !== loadSeq.current) return;
       if (e instanceof ApiError && e.status === 404) setGone(true);
       else setLoadError(e);
     }
   }, [id]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load, user?.id]));
+  // A different account (or logged out) must not see the previous user's event state, cars or chat link.
+  const userId = user?.id ?? null;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+  const firstUser = useRef(true);
+  useEffect(() => {
+    if (firstUser.current) { firstUser.current = false; return; }
+    loadSeq.current++;
+    setEv(null);
+    setPeople(null);
+    setCars(null);
+    setCarId(null);
+    setSeats(0);
+    setJoining(false);
+    setNote(null);
+    setMenuFor(null);
+    load();
+  }, [userId, load]);
+
+  useFocusEffect(useCallback(() => { load(); }, [load, userId]));
   // someone joined / left / the organizer edited: reload live
   useEffect(() => chat.on('eventUpdated', (u) => { if (sameId(u.eventId, id)) load(); }), [chat, id, load]);
 
@@ -70,8 +94,10 @@ export default function EventScreen() {
     setJoining(true);
     setNote(null);
     if (!cars) {
+      const forUser = user.id;
       try {
-        const r = await api.cars(user.id);
+        const r = await api.cars(forUser);
+        if (!sameId(forUser, userIdRef.current)) return;
         const items = [...r.items].sort((a, b) => (sameId(a.id, user.currentCarId) ? -1 : sameId(b.id, user.currentCarId) ? 1 : 0));
         setCars(items);
         if (items[0]) setCarId(items[0].id);
@@ -146,7 +172,7 @@ export default function EventScreen() {
   const loc = eventLocation(ev);
   const level = eventLevel(ev);
   const pos = waitlistPosition(people ?? [], myId);
-  const when = formatEventWhen(ev.startsAt, ev.endsAt, { weekdays: d.events.weekdays, months: d.chat.months });
+  const when = withZoneLabel(formatEventWhen(ev.startsAt, ev.endsAt, { weekdays: d.events.weekdays, months: d.chat.months }), t('events.bakuTime'));
   const where = placeName(ev) ?? t('events.meetingPoint');
 
   function openMaps() {
@@ -350,13 +376,13 @@ export default function EventScreen() {
             </Section>
           ) : null}
 
-          {isOrg && (ev.canEdit || canCancel(ev) || ev.coverUrl) ? (
+          {isOrg && (ev.canEdit || canCancel(ev)) ? (
             <Section header={t('events.organizerTools')}>
               {ev.canEdit ? <Cell title={t('events.edit')} left={<IconTile icon="edit" />} onPress={() => router.push(`/event/edit/${ev.id}`)} /> : null}
-              {ev.status === 'scheduled' ? (
+              {ev.canEdit ? (
                 <Cell title={ev.coverUrl ? t('events.coverChange') : t('events.coverAdd')} left={<IconTile icon="camera" />} onPress={changeCover} disabled={busy === 'cover'} />
               ) : null}
-              {ev.coverUrl ? (
+              {ev.canEdit && ev.coverUrl ? (
                 <Cell title={t('events.coverRemove')} left={<IconTile icon="trash" />} onPress={() => act('cover', () => api.deleteEventCover(id))} disabled={busy === 'cover'} />
               ) : null}
               {canCancel(ev) ? <Cell title={t('events.cancel')} destructive center chevron={false} onPress={() => router.push(`/event/cancel/${ev.id}`)} /> : null}

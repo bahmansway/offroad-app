@@ -262,7 +262,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, [setList]);
 
   const setMuted = useCallback(async (id: Id, muted: boolean) => {
+    const my = session.current;
     const r = muted ? await api.mute(id) : await api.unmute(id);
+    if (my !== session.current) return; // logged out / another user meanwhile
     const value = typeof r?.muted === 'boolean' ? r.muted : muted;
     if (listRef.current) setList(patchConversation(listRef.current, id, { muted: value }));
     refreshUnreadRef.current();

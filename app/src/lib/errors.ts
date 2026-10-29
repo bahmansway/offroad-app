@@ -74,6 +74,7 @@ export function inviteErrorMessage(e: unknown, t: T): string {
   if (e instanceof ApiError) {
     const m = e.message;
     if (e.code === 'CONFLICT') {
+      if (/declined an invite recently/i.test(m)) return t('clan.inviteDeclinedRecently');
       if (/pending invite/i.test(m) && /already has/i.test(m)) return t('clan.inviteAlready');
       if (/already in (a|your) clan/i.test(m)) return t('clan.inviteInClan');
       if (/pending invites/i.test(m)) return t('clan.inviteLimit');

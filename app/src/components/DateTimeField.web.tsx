@@ -2,13 +2,17 @@ import React from 'react';
 import { View } from 'react-native';
 import { useTheme } from '../lib/themeContext';
 import { type as typeScale } from '../lib/theme';
-import { fromLocalInputValue, toLocalInputValue } from '../lib/eventLogic';
+import { deviceOnBakuTime, fromBakuInputValue, toBakuInputValue } from '../lib/eventLogic';
+import { useI18n } from '../lib/i18n';
 import { Txt } from './ui/Text';
 import type { DateTimeFieldProps } from './DateTimeField';
 
-/** Web: the browser's own date + time picker (<input type="datetime-local">), styled like a TextField. */
+/** Web: the browser's own date + time picker (<input type="datetime-local">), styled like a TextField. Values are Baku time. */
 export function DateTimeField({ label, value, onChange, minimumDate, maximumDate, error }: DateTimeFieldProps) {
   const { c, scheme } = useTheme();
+  const { t } = useI18n();
+  const onBaku = deviceOnBakuTime();
+  const a11y = onBaku ? label : `${label} (${t('events.bakuTime')})`;
   const font = typeScale.body as { fontSize: number; fontFamily?: string; fontWeight?: string };
   return (
     <View style={{ gap: 6 }}>
@@ -16,14 +20,14 @@ export function DateTimeField({ label, value, onChange, minimumDate, maximumDate
       <View style={{ minHeight: 52, paddingHorizontal: 16, borderRadius: 26, backgroundColor: c.card, borderWidth: 1, borderColor: error ? c.destructive : 'transparent', justifyContent: 'center' }}>
         <input
           type="datetime-local"
-          aria-label={label}
+          aria-label={a11y}
           aria-invalid={error ? true : undefined}
-          value={toLocalInputValue(value)}
-          min={minimumDate ? toLocalInputValue(minimumDate) : undefined}
-          max={maximumDate ? toLocalInputValue(maximumDate) : undefined}
+          value={toBakuInputValue(value)}
+          min={minimumDate ? toBakuInputValue(minimumDate) : undefined}
+          max={maximumDate ? toBakuInputValue(maximumDate) : undefined}
           step={300}
           onChange={(ev) => {
-            const d = fromLocalInputValue((ev.target as HTMLInputElement).value);
+            const d = fromBakuInputValue((ev.target as HTMLInputElement).value);
             if (d) onChange(d);
           }}
           style={{
@@ -33,7 +37,8 @@ export function DateTimeField({ label, value, onChange, minimumDate, maximumDate
           }}
         />
       </View>
-      {error ? <Txt variant="footnote" tone="destructive" style={{ paddingHorizontal: 20 }} role="alert">{error}</Txt> : null}
+      {error ? <Txt variant="footnote" tone="destructive" style={{ paddingHorizontal: 20 }} role="alert">{error}</Txt>
+        : !onBaku ? <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20 }}>{t('events.bakuTime')}</Txt> : null}
     </View>
   );
 }

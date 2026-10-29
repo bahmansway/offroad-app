@@ -197,6 +197,7 @@ export function EventForm({ mode, initial, initialSpotName, myClan, cars, minCar
                 onPress={() => setStep('map')}
               />
             </Section>
+            <PrivacyNote />
             <TextField
               label={t('events.form.meetingLabel')}
               placeholder={t('events.form.meetingLabelPlaceholder')}
@@ -375,6 +376,18 @@ function SpotPicker({ onBack, onPick }: { onBack: () => void; onPick: (s: Spot) 
   );
 }
 
+/** Meeting points are public: warn people not to use their home (CLAUDE.md privacy rule). */
+function PrivacyNote() {
+  const { t } = useI18n();
+  const { c } = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 20, alignItems: 'flex-start' }} accessible accessibilityRole="text" accessibilityLabel={t('events.form.meetingPrivacy')}>
+      <Icon name="lock" size={16} color={c.tint} />
+      <Txt variant="footnote" tone="label2" style={{ flex: 1 }}>{t('events.form.meetingPrivacy')}</Txt>
+    </View>
+  );
+}
+
 /** Android hardware back inside a form step returns to the form instead of leaving the page. */
 function BackOverride({ onBack }: { onBack: () => void }) {
   useEffect(() => {
@@ -405,7 +418,8 @@ function MeetingPicker({ initial, onBack, onPick, insetsTop, insetsBottom }: {
       <BackOverride onBack={onBack} />
       <View style={{ paddingTop: insetsTop }}>
         <NavBar title={t('events.form.meeting')} onBack={onBack} />
-        <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20, paddingBottom: 12 }}>{t('events.form.pickOnMap')}</Txt>
+        <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20, paddingBottom: 6 }}>{t('events.form.pickOnMap')}</Txt>
+        <View style={{ paddingBottom: 10 }}><PrivacyNote /></View>
       </View>
       <View style={{ flex: 1 }}>
         <SpotMap

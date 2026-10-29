@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
@@ -39,18 +39,26 @@ export default function ClanScreen() {
   const [invites, setInvites] = useState<ClanInvite[] | null>(null);
   const [events, setEvents] = useState<EventSummary[] | null>(null);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const my = ++loadSeq.current;
     setLoadError(null);
     try {
-      const [cl, m] = await Promise.all([api.clan(id), api.clanMembers(id)]);
+      const [cl, m, ev] = await Promise.all([
+        api.clan(id),
+        api.clanMembers(id),
+        api.clanEvents(id).then((r) => r.items).catch(() => [] as EventSummary[]),
+      ]);
+      if (my !== loadSeq.current) return; // a newer load (or another clan) won
       setClan(cl);
+      setEvents(ev);
       setMembers(m.items);
       setGone(false);
       setRequestsError(null);
-      api.clanEvents(id).then((r) => setEvents(r.items)).catch(() => setEvents([]));
       if (clanPermissions(cl.myRole).manageRequests) {
         try {
           const [rq, inv] = await Promise.all([api.clanRequests(id), api.clanInvites(id)]);
+          if (my !== loadSeq.current) return;
           setRequests(rq.items);
           setInvites(inv.items);
         } catch (e) {
@@ -63,6 +71,7 @@ export default function ClanScreen() {
         setInvites(null);
       }
     } catch (e) {
+      if (my !== loadSeq.current) return;
       if (e instanceof ApiError && e.status === 404) setGone(true);
       else setLoadError(e);
     }

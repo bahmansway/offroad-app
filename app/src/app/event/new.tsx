@@ -7,6 +7,7 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useChat } from '../../lib/chat';
 import { useAsync } from '../../lib/useAsync';
+import { sameId } from '../../lib/format';
 import { successFeedback } from '../../lib/haptics';
 import { defaultStart, eventPayload, type EventFormState } from '../../lib/eventLogic';
 
@@ -25,7 +26,7 @@ function NewEvent() {
       spotId ? api.spot(spotId).catch(() => null) : Promise.resolve(null),
     ]);
     // the current car first
-    const items = [...cars.items].sort((a, b) => (a.id === user?.currentCarId ? -1 : b.id === user?.currentCarId ? 1 : 0));
+    const items = [...cars.items].sort((a, b) => (sameId(a.id, user?.currentCarId) ? -1 : sameId(b.id, user?.currentCarId) ? 1 : 0));
     return { cars: items, clan: profile?.clan ?? null, spot };
   }, [user?.id, spotId]);
 

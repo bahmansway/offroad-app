@@ -133,18 +133,62 @@ export function eventLevel(e: Pick<EventSummary, 'minDifficulty' | 'spot'>): num
   return e.minDifficulty ?? e.spot?.difficulty ?? null;
 }
 
-// ---------- dates ----------
+// ---------- dates (always Baku time) ----------
+//
+// Events happen in Azerbaijan, so times are entered and shown in Baku time (Asia/Baku, UTC+4, no
+// daylight saving since 2016) whatever zone the phone or browser is in. The server gets plain ISO (UTC).
+
+export const BAKU_TZ = 'Asia/Baku';
+export const BAKU_OFFSET_MS = 4 * 60 * 60 * 1000;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** Date block on cards: "02" + "NOV" (month short name from the dictionary). */
+export interface BakuParts { year: number; month: number; day: number; hour: number; minute: number; weekday: number }
+
+/** Wall-clock parts of a moment in Baku. `month` is 0–11, `weekday` 0 = Sunday. */
+export function bakuParts(d: Date): BakuParts {
+  const b = new Date(d.getTime() + BAKU_OFFSET_MS);
+  return {
+    year: b.getUTCFullYear(), month: b.getUTCMonth(), day: b.getUTCDate(),
+    hour: b.getUTCHours(), minute: b.getUTCMinutes(), weekday: b.getUTCDay(),
+  };
+}
+
+/** The moment when Baku clocks show this date/time. `month` is 0–11. */
+export function fromBakuParts(year: number, month: number, day: number, hour: number, minute: number): Date {
+  return new Date(Date.UTC(year, month, day, hour, minute) - BAKU_OFFSET_MS);
+}
+
+/** "09:05" in Baku. */
+export function bakuTime(iso: string | Date): string {
+  const d = typeof iso === 'string' ? new Date(iso) : iso;
+  if (Number.isNaN(d.getTime())) return '';
+  const p = bakuParts(d);
+  return `${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/**
+ * Is this device already on Baku time? Then no "Baku time" label is needed.
+ * `zone`/`offsetMin` are for tests; by default the device's own values are used.
+ */
+export function deviceOnBakuTime(zone?: string | null, offsetMin?: number): boolean {
+  let z = zone;
+  if (z === undefined) {
+    try { z = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { z = null; }
+  }
+  if (z) return z === BAKU_TZ;
+  return (offsetMin ?? new Date().getTimezoneOffset()) === -240;
+}
+
+/** Date block on cards: "02" + "NOV" (month short name from the dictionary), Baku date. */
 export function dateBlock(iso: string, monthsShort: string[]): { day: string; month: string } {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { day: '–', month: '' };
-  return { day: pad(d.getDate()), month: monthsShort[d.getMonth()] ?? '' };
+  const p = bakuParts(d);
+  return { day: pad(p.day), month: monthsShort[p.month] ?? '' };
 }
 
-/** "Sat, 2 November · 09:00" or "Sat, 2 November · 09:00 – 18:00" / "… – Sun, 3 November · 18:00". */
+/** "Sat, 2 November · 09:00" or "… · 09:00 – 18:00" / "… – Sun, 3 November · 18:00" (Baku time). */
 export function formatEventWhen(
   startIso: string,
   endIso: string | null | undefined,
@@ -152,40 +196,60 @@ export function formatEventWhen(
 ): string {
   const s = new Date(startIso);
   if (Number.isNaN(s.getTime())) return '';
-  const day = (d: Date) => `${words.weekdays[d.getDay()] ?? ''}, ${d.getDate()} ${words.months[d.getMonth()] ?? ''}`;
-  const time = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  let out = `${day(s)} · ${time(s)}`;
+  const day = (p: BakuParts) => `${words.weekdays[p.weekday] ?? ''}, ${p.day} ${words.months[p.month] ?? ''}`;
+  const time = (p: BakuParts) => `${pad(p.hour)}:${pad(p.minute)}`;
+  const sp = bakuParts(s);
+  let out = `${day(sp)} · ${time(sp)}`;
   if (endIso) {
     const e = new Date(endIso);
     if (!Number.isNaN(e.getTime())) {
-      const same = e.getFullYear() === s.getFullYear() && e.getMonth() === s.getMonth() && e.getDate() === s.getDate();
-      out += same ? ` – ${time(e)}` : ` – ${day(e)} · ${time(e)}`;
+      const ep = bakuParts(e);
+      const same = ep.year === sp.year && ep.month === sp.month && ep.day === sp.day;
+      out += same ? ` – ${time(ep)}` : ` – ${day(ep)} · ${time(ep)}`;
     }
   }
   return out;
 }
 
-/** Local value for <input type="datetime-local">: "2026-11-02T09:00". */
-export function toLocalInputValue(d: Date | null | undefined): string {
-  if (!d || Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** Adds " (Baku time)" when the device is in another zone. */
+export function withZoneLabel(text: string, label: string, onBaku: boolean = deviceOnBakuTime()): string {
+  return onBaku || !text ? text : `${text} (${label})`;
 }
 
-/** Parse a datetime-local value as local time. Empty / bad → null. */
-export function fromLocalInputValue(v: string | null | undefined): Date | null {
+/** Value for <input type="datetime-local"> showing Baku wall-clock time: "2026-11-02T09:00". */
+export function toBakuInputValue(d: Date | null | undefined): string {
+  if (!d || Number.isNaN(d.getTime())) return '';
+  const p = bakuParts(d);
+  return `${p.year}-${pad(p.month + 1)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/** Parse a datetime-local value as Baku time. Empty / bad → null. */
+export function fromBakuInputValue(v: string | null | undefined): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec((v ?? '').trim());
   if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] ?? 0));
-  return Number.isNaN(d.getTime()) ? null : d;
+  const [y, mo, d, h, mi] = [m[1], m[2], m[3], m[4], m[5]].map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return null;
+  return fromBakuParts(y, mo - 1, d, h, mi);
 }
 
-/** Default start for a new event: next Saturday 09:00 (at least a day ahead). */
+/**
+ * Android picks date and time in two dialogs (both shown in Baku time): keep the Baku date of the
+ * first answer and the Baku hour/minute of the second.
+ */
+export function combineBakuDateTime(datePart: Date, timePart: Date): Date {
+  const d = bakuParts(datePart);
+  const t = bakuParts(timePart);
+  return fromBakuParts(d.year, d.month, d.day, t.hour, t.minute);
+}
+
+/** Default start for a new event: next Saturday 09:00 Baku time, at least a day ahead. */
 export function defaultStart(now: Date = new Date()): Date {
-  const d = new Date(now);
-  d.setHours(9, 0, 0, 0);
-  do d.setDate(d.getDate() + 1);
-  while (d.getDay() !== 6 || d.getTime() - now.getTime() < 24 * 60 * 60 * 1000);
-  return d;
+  const p = bakuParts(now);
+  for (let i = 1; i <= 14; i++) {
+    const c = fromBakuParts(p.year, p.month, p.day + i, 9, 0);
+    if (bakuParts(c).weekday === 6 && c.getTime() - now.getTime() >= 24 * 60 * 60 * 1000) return c;
+  }
+  return fromBakuParts(p.year, p.month, p.day + 7, 9, 0);
 }
 
 // ---------- form ----------

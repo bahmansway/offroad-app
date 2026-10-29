@@ -4,7 +4,7 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 import { useTheme } from '../lib/themeContext';
 import { useI18n } from '../lib/i18n';
 import { TAP } from '../lib/theme';
-import { formatEventWhen } from '../lib/eventLogic';
+import { BAKU_TZ, combineBakuDateTime, deviceOnBakuTime, formatEventWhen, withZoneLabel } from '../lib/eventLogic';
 import { Icon } from './ui/Icon';
 import { Txt } from './ui/Text';
 
@@ -18,7 +18,8 @@ export interface DateTimeFieldProps {
 }
 
 /**
- * Date + time picker that works in Expo Go.
+ * Date + time picker that works in Expo Go. Always Baku time (the pickers get `timeZoneName`),
+ * with a "Baku time" note when the phone is in another zone.
  * iOS: the system compact picker (date chip + time chip) in a card row.
  * Android: tap → system date dialog, then the time dialog.
  * Web: see DateTimeField.web.tsx (<input type="datetime-local">).
@@ -26,7 +27,10 @@ export interface DateTimeFieldProps {
 export function DateTimeField({ label, value, onChange, minimumDate, maximumDate, error }: DateTimeFieldProps) {
   const { c, scheme } = useTheme();
   const { t, d } = useI18n();
-  const shown = value ? formatEventWhen(value.toISOString(), null, { weekdays: d.events.weekdays, months: d.chat.months }) : t('events.form.pickDate');
+  const onBaku = deviceOnBakuTime();
+  const shown = value
+    ? withZoneLabel(formatEventWhen(value.toISOString(), null, { weekdays: d.events.weekdays, months: d.chat.months }), t('events.bakuTime'), onBaku)
+    : t('events.form.pickDate');
 
   function openAndroid() {
     const start = value ?? minimumDate ?? new Date();
@@ -35,17 +39,17 @@ export function DateTimeField({ label, value, onChange, minimumDate, maximumDate
       value: start,
       minimumDate,
       maximumDate,
+      timeZoneName: BAKU_TZ,
       onValueChange: (_e, date) => {
         if (!date) return;
         DateTimePickerAndroid.open({
           mode: 'time',
           is24Hour: true,
           value: date,
+          timeZoneName: BAKU_TZ,
           onValueChange: (_e2, time) => {
             if (!time) return;
-            const out = new Date(date);
-            out.setHours(time.getHours(), time.getMinutes(), 0, 0);
-            onChange(out);
+            onChange(combineBakuDateTime(date, time));
           },
         });
       },
@@ -69,6 +73,7 @@ export function DateTimeField({ label, value, onChange, minimumDate, maximumDate
             minimumDate={minimumDate}
             maximumDate={maximumDate}
             minuteInterval={5}
+            timeZoneName={BAKU_TZ}
             accentColor={c.tint}
             themeVariant={scheme}
             onValueChange={(_e, date) => { if (date) onChange(date); }}
@@ -89,7 +94,8 @@ export function DateTimeField({ label, value, onChange, minimumDate, maximumDate
           <Icon name="chevron" size={16} color={c.label3} strokeWidth={2.6} />
         </Pressable>
       )}
-      {error ? <Txt variant="footnote" tone="destructive" style={{ paddingHorizontal: 20 }} role="alert">{error}</Txt> : null}
+      {error ? <Txt variant="footnote" tone="destructive" style={{ paddingHorizontal: 20 }} role="alert">{error}</Txt>
+        : !onBaku && Platform.OS === 'ios' ? <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20 }}>{t('events.bakuTime')}</Txt> : null}
     </View>
   );
 }

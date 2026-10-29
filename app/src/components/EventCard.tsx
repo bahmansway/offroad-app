@@ -4,8 +4,7 @@ import { router } from 'expo-router';
 import { useTheme } from '../lib/themeContext';
 import { useI18n } from '../lib/i18n';
 import { radius, TAP } from '../lib/theme';
-import { formatTime } from '../lib/chatLogic';
-import { badgeTone, cardBadge, dateBlock, eventLevel, placeName } from '../lib/eventLogic';
+import { bakuParts, bakuTime, badgeTone, cardBadge, dateBlock, eventLevel, formatEventWhen, placeName, withZoneLabel } from '../lib/eventLogic';
 import type { EventSummary } from '../lib/types';
 import { Badge } from './ui/Controls';
 import { Icon } from './ui/Icon';
@@ -33,9 +32,12 @@ export function useEventCardText(e: EventSummary) {
   const { t, d } = useI18n();
   const level = eventLevel(e);
   const badge = cardBadge(e);
-  const when = `${d.events.weekdays[new Date(e.startsAt).getDay()] ?? ''} ${formatTime(e.startsAt)}`;
+  const when = `${d.events.weekdays[bakuParts(new Date(e.startsAt)).weekday] ?? ''} ${bakuTime(e.startsAt)}`;
+  /** full date for screen readers, in the app language */
+  const whenFull = withZoneLabel(formatEventWhen(e.startsAt, e.endsAt, { weekdays: d.events.weekdays, months: d.chat.months }), t('events.bakuTime'));
   return {
     when,
+    whenFull,
     place: placeName(e) ?? t('events.meetingPoint'),
     cars: t('events.carsOf', { count: e.carCount, max: e.maxCars }),
     level: level ? `${level} · ${d.levels.names[level - 1]}` : null,
@@ -54,7 +56,7 @@ export function EventCard({ event: e, onPress }: { event: EventSummary; onPress?
   const x = useEventCardText(e);
   const over = e.status !== 'scheduled';
   const label = [
-    e.title, x.when, new Date(e.startsAt).toLocaleDateString(), x.place, x.cars, x.waiting,
+    e.title, x.whenFull, x.place, x.cars, x.waiting,
     x.level ? `${t('spot.difficulty')} ${x.level}` : null,
     x.clan ? `${t('clan.clanHeader')} ${e.clan!.name}${x.clanOnly ? `, ${t('events.clanOnly')}` : ''}` : null,
     x.badgeText,

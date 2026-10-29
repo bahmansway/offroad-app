@@ -7,6 +7,7 @@ import { useChat } from '../lib/chat';
 import { formatDate } from '../lib/format';
 import { successFeedback } from '../lib/haptics';
 import { acceptInviteErrorMessage } from '../lib/errors';
+import { confirmAsync } from '../lib/dialogs';
 import type { MyClanInvite } from '../lib/types';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -56,6 +57,8 @@ export default function ClansScreen() {
   useFocusEffect(useCallback(() => { chat.reloadInvites(); }, [chat.reloadInvites]));
 
   async function answer(inv: MyClanInvite, accept: boolean) {
+    // declining blocks a new invite from this clan for 24 h, so ask first
+    if (!accept && !(await confirmAsync(t('clan.declineConfirm', { name: inv.clan.name }), t('clan.decline'), t('common.cancel')))) return;
     setBusy(`${accept ? 'a' : 'd'}:${inv.id}`);
     setNote(null);
     try {
