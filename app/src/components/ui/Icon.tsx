@@ -49,6 +49,13 @@ const ICONS = {
   location: { sf: 'mappin.and.ellipse', d: 'M12 17s-5-4.5-5-8.5a5 5 0 0 1 10 0c0 4-5 8.5-5 8.5Z M5 20h14' },
   calendarSmall: { sf: 'calendar', d: 'M5.5 5h13A1.5 1.5 0 0 1 20 6.5v12a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-12A1.5 1.5 0 0 1 5.5 5Z M4 10h16' },
   sparkle: { sf: 'checkmark.seal', d: 'm4 12 5 5L20 6' },
+  pinMsg: { sf: 'pin', d: 'M9 4h6l-1 6 3 3H7l3-3Z M12 13v8' },
+  bell: { sf: 'bell', d: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4Z M10 21h4' },
+  bellOff: { sf: 'bell.slash', d: 'M6 16V11a6 6 0 0 1 9.5-4.9 M18 11v5l2 2H8 M10 21h4 M3 3l18 18' },
+  people: { sf: 'person.2', d: 'M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7Z M2.5 20a6.5 6.5 0 0 1 13 0 M16 4.3a3.5 3.5 0 0 1 0 6.4 M18 14a6.5 6.5 0 0 1 3.5 6' },
+  clock: { sf: 'clock', d: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18Z M12 7v5l3 2' },
+  invite: { sf: 'person.badge.plus', d: 'M10 11a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M3 20a7 7 0 0 1 11-5.7 M19 14v6 M16 17h6' },
+  minus: { sf: 'minus', d: 'M5 12h14' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

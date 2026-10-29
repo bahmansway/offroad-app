@@ -1,23 +1,24 @@
 import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { Avatar, Cell, EmptyState, ErrorState, IconTile, LargeTitleScreen, LoadingState, Section, Txt, useTheme } from '../../components/ui';
+import { Avatar, Badge, Cell, EmptyState, ErrorState, Icon, IconTile, LargeTitleScreen, LoadingState, Section, Thumb, Txt, useTheme } from '../../components/ui';
 import { photoUri } from '../../components/Rows';
 import { ClanLogo } from '../../components/ClanBits';
 import { useAuth } from '../../lib/auth';
 import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { errorMessage } from '../../lib/errors';
-import { listTime, previewText } from '../../lib/chatLogic';
+import { listTime, previewText, visibleUnread } from '../../lib/chatLogic';
+import { messageText } from '../../lib/systemMessages';
 import type { Conversation } from '../../lib/types';
 
 export default function ChatTab() {
   const { t } = useI18n();
   const { user, offline } = useAuth();
-  const { conversations, error, reload, status } = useChat();
+  const { conversations, error, reload, status, reloadInvites } = useChat();
   const [refreshing, setRefreshing] = useState(false);
 
-  useFocusEffect(useCallback(() => { if (user) reload(); }, [user, reload]));
+  useFocusEffect(useCallback(() => { if (user) { reload(); reloadInvites(); } }, [user, reload, reloadInvites]));
 
   if (!user) {
     return (
@@ -32,11 +33,12 @@ export default function ChatTab() {
 
   const clanChats = (conversations ?? []).filter((c) => c.type === 'clan');
   const dms = (conversations ?? []).filter((c) => c.type === 'dm');
+  const events = (conversations ?? []).filter((c) => c.type === 'event');
 
   return (
     <LargeTitleScreen
       title={t('chat.title')}
-      onRefresh={async () => { setRefreshing(true); await reload(); setRefreshing(false); }}
+      onRefresh={async () => { setRefreshing(true); await Promise.all([reload(), reloadInvites()]); setRefreshing(false); }}
       refreshing={refreshing}
     >
       {status === 'offline' ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite">{t('chat.offline')}</Txt> : null}
@@ -46,13 +48,18 @@ export default function ChatTab() {
         </Section>
       ) : null}
       <ClansEntry />
+      {events.length ? (
+        <Section header={t('chat.events')}>
+          {events.map((c) => <ConversationCell key={c.id} conv={c} />)}
+        </Section>
+      ) : null}
       {conversations === null && !error ? <LoadingState inline /> : null}
       {error && conversations === null ? <ErrorState message={errorMessage(error, t)} onRetry={reload} /> : null}
       {dms.length ? (
         <Section header={t('chat.messages')}>
           {dms.map((c) => <ConversationCell key={c.id} conv={c} />)}
         </Section>
-      ) : conversations && !clanChats.length ? (
+      ) : conversations && !clanChats.length && !events.length ? (
         <EmptyState icon="chat" title={t('chat.noChatsTitle')} text={t('chat.noChatsText')} />
       ) : null}
     </LargeTitleScreen>
@@ -61,14 +68,19 @@ export default function ChatTab() {
 
 function ClansEntry() {
   const { t } = useI18n();
+  const { invites } = useChat();
+  const n = invites?.length ?? 0;
   return (
     <Section>
       <Cell
         title={t('chat.clans')}
-        subtitle={t('chat.clansSubtitle')}
-        left={<IconTile icon="profile" />}
+        subtitle={n ? t('chat.invitesWaiting', { count: n }) : t('chat.clansSubtitle')}
+        left={<IconTile icon="people" />}
+        right={n ? <Badge text={String(n)} /> : undefined}
+        chevron
         onPress={() => router.push('/clans')}
         accessibilityRole="link"
+        accessibilityLabel={[t('chat.clans'), n ? t('chat.invitesWaiting', { count: n }) : t('chat.clansSubtitle')].join(', ')}
       />
     </Section>
   );
@@ -78,17 +90,22 @@ function ConversationCell({ conv, last }: { conv: Conversation; last?: boolean }
   const { t } = useI18n();
   const { c } = useTheme();
   const { user } = useAuth();
-  const preview = conv.lastMessage ? previewText(conv, user?.id, t('chat.you')) : t('chat.noMessagesYet');
+  const preview = conv.lastMessage ? previewText(conv, user?.id, t('chat.you'), (m) => messageText(m, t)) : t('chat.noMessagesYet');
   const time = conv.lastMessage ? listTime(conv.lastMessage.createdAt, new Date(), t('chat.yesterday')) : '';
-  const unread = conv.unreadCount > 0;
+  const count = visibleUnread(conv);
+  const unread = count > 0;
   const left = conv.type === 'clan'
     ? <ClanLogo clan={{ id: conv.clanId ?? conv.id, tag: initialsOf(conv.title), logoUrl: conv.avatarUrl }} size={52} />
-    : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={52} />;
+    : conv.type === 'event'
+      ? <Thumb seed={conv.eventId ?? conv.id} uri={photoUri(conv.avatarUrl)} icon="events" size={52} rounded={14} />
+      : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={52} />;
   const label = [
-    conv.type === 'clan' ? `${t('chat.clanChat')}: ${conv.title}` : conv.title,
+    conv.type === 'clan' ? `${t('chat.clanChat')}: ${conv.title}` : conv.type === 'event' ? `${t('chat.eventChat')}: ${conv.title}` : conv.title,
     preview,
     time,
-    unread ? t('chat.unread', { count: conv.unreadCount }) : null,
+    unread ? t('chat.unread', { count }) : null,
+    conv.muted ? t('chat.muted') : null,
+    conv.readOnly ? t('chat.readOnly') : null,
   ].filter(Boolean).join(', ');
   return (
     <Cell
@@ -106,8 +123,12 @@ function ConversationCell({ conv, last }: { conv: Conversation; last?: boolean }
           <Txt variant="footnote" color={unread ? c.tint : c.label2}>{time}</Txt>
           {unread ? (
             <View style={{ minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: c.tint, alignItems: 'center', justifyContent: 'center' }}>
-              <Txt variant="caption" color={c.onTint} style={{ fontWeight: '700' }}>{conv.unreadCount > 99 ? '99+' : String(conv.unreadCount)}</Txt>
+              <Txt variant="caption" color={c.onTint} style={{ fontWeight: '700' }}>{count > 99 ? '99+' : String(count)}</Txt>
             </View>
+          ) : conv.muted ? (
+            <View style={{ height: 22, justifyContent: 'center' }}><Icon name="bellOff" size={16} color={c.label2} /></View>
+          ) : conv.readOnly ? (
+            <View style={{ height: 22, justifyContent: 'center' }}><Icon name="lock" size={16} color={c.label2} /></View>
           ) : <View style={{ height: 22 }} />}
         </View>
       }

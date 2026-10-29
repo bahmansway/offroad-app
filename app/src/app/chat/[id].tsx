@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Avatar, EmptyState, ErrorState, Icon, LoadingState, NavBar, Txt, goBack, useTheme } from '../../components/ui';
+import { Avatar, EmptyState, ErrorState, Icon, IconButton, LoadingState, NavBar, Thumb, Txt, goBack, useTheme } from '../../components/ui';
 import { RequireAuth } from '../../components/RequireAuth';
 import { ActionSheet, type SheetAction } from '../../components/ActionSheet';
 import { ClanLogo } from '../../components/ClanBits';
@@ -13,13 +13,17 @@ import { useAuth } from '../../lib/auth';
 import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { chatErrorMessage, errorMessage } from '../../lib/errors';
+import { confirmAsync } from '../../lib/dialogs';
+import { formatDate, sameId } from '../../lib/format';
+import { canDeleteMessage, canPinMessage } from '../../lib/permissions';
+import { isSystem, messageText, systemText } from '../../lib/systemMessages';
 import { HAIRLINE, TAP, type as typeScale } from '../../lib/theme';
 import { tapFeedback } from '../../lib/haptics';
 import {
-  buildRows, dayLabel, dropPending, formatTime, isLocal, MAX_MESSAGE, mergeLatestPage, mergeMessages, newClientId,
-  oldestId, pendingMessage, setStatus, type ChatItem, type ChatRow,
+  applyDeleted, buildRows, dayLabel, dropPending, formatTime, isLocal, MAX_MESSAGE, mergeLatestPage, mergeMessages, newClientId,
+  oldestId, pendingMessage, pinnedAfterDelete, setStatus, type ChatItem, type ChatRow,
 } from '../../lib/chatLogic';
-import type { Conversation } from '../../lib/types';
+import type { Conversation, Pinned } from '../../lib/types';
 
 const PAGE = 50;
 
@@ -46,6 +50,9 @@ function Chat() {
   const [text, setText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [menu, setMenu] = useState<ChatItem | null>(null);
+  const [pinned, setPinned] = useState<Pinned | null>(conv?.pinned ?? null);
+  const [muteBusy, setMuteBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const focused = useRef(false);
@@ -58,6 +65,7 @@ function Chat() {
     try {
       const [cv, page] = await Promise.all([api.conversation(id), api.messages(id, { limit: PAGE })]);
       setConv(cv);
+      setPinned(cv.pinned ?? null);
       setItems((cur) => mergeLatestPage(cur, page));
       setHasMore(page.hasMore);
       setLoaded(true);
@@ -73,8 +81,31 @@ function Chat() {
   // live messages
   useEffect(() => subscribe(id, (m) => {
     setItems((cur) => mergeMessages(cur, [m]));
-    if (focused.current && String(m.sender.id) !== String(user?.id)) markRead(id);
+    if (focused.current && !sameId(m.sender?.id, user?.id)) markRead(id);
   }), [id, subscribe, markRead, user?.id]);
+
+  // live delete / pin / event changes (read-only after cancel, removed from the event)
+  const reloadConv = useCallback(async () => {
+    try {
+      const cv = await api.conversation(id);
+      setConv(cv);
+      setPinned(cv.pinned ?? null);
+    } catch (e) {
+      if (isGone(e)) setNoAccess(true);
+    }
+  }, [id]);
+  useEffect(() => {
+    const offs = [
+      chat.on('deleted', (dl) => {
+        if (!sameId(dl.conversationId, id)) return;
+        setItems((cur) => applyDeleted(cur, dl));
+        setPinned((p) => pinnedAfterDelete(p, dl.id));
+      }),
+      chat.on('pinned', (p) => { if (sameId(p.conversationId, id)) setPinned(p.pinned); }),
+      chat.on('eventUpdated', (u) => { if (conv?.eventId && sameId(u.eventId, conv.eventId)) reloadConv(); }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [chat, id, conv?.eventId, reloadConv]);
 
   // poll / reconnect: fetch the newest page
   useEffect(() => onCatchUp(async () => {
@@ -124,6 +155,8 @@ function Chat() {
       setSendError(chatErrorMessage(e, t, kind));
       // 404 = chat gone; 403 in a clan chat = removed from the clan (in a DM, 403 means blocked)
       if (e instanceof ApiError && (e.status === 404 || (e.status === 403 && kind === 'clan'))) setNoAccess(true);
+      // event chat: 403 = became read-only (cancelled/finished) or I was removed → ask again
+      if (e instanceof ApiError && e.status === 403 && kind === 'event') reloadConv();
     }
   }
 
@@ -144,27 +177,90 @@ function Chat() {
 
   const rows = useMemo(() => buildRows(items, user?.id).reverse(), [items, user?.id]);
   const isClan = conv?.type === 'clan';
+  const isEvent = conv?.type === 'event';
+  const group = isClan || isEvent;
+  const readOnly = !!conv?.readOnly;
+  const muted = !!conv?.muted;
+
+  async function toggleMute() {
+    if (!conv) return;
+    setMuteBusy(true);
+    setNote(null);
+    try {
+      await chat.setMuted(id, !muted);
+      setConv({ ...conv, muted: !muted });
+      setNote(!muted ? t('chat.mutedOn') : t('chat.mutedOff'));
+    } catch (e) {
+      setNote(errorMessage(e, t));
+    } finally {
+      setMuteBusy(false);
+    }
+  }
+
+  async function del(m: ChatItem) {
+    if (!(await confirmAsync(t('chat.deleteConfirm'), t('common.delete'), t('common.cancel')))) return;
+    try {
+      await api.deleteMessage(id, m.id);
+      setItems((cur) => applyDeleted(cur, { id: m.id, deletedAt: new Date().toISOString() }));
+      setPinned((p) => pinnedAfterDelete(p, m.id));
+    } catch (e) {
+      setSendError(e instanceof ApiError && e.status === 403 ? t('chat.deleteFailed') : errorMessage(e, t));
+    }
+  }
+
+  async function pin(m: ChatItem) {
+    try {
+      const r = await api.pin(id, m.id);
+      setPinned(r.pinned);
+      chat.patch(id, { pinned: r.pinned });
+    } catch (e) {
+      setSendError(e instanceof ApiError && (e.status === 400 || e.status === 403) ? t('chat.pinFailed') : errorMessage(e, t));
+    }
+  }
+
+  async function unpin() {
+    try {
+      await api.unpin(id);
+      setPinned(null);
+      chat.patch(id, { pinned: null });
+    } catch (e) {
+      setSendError(errorMessage(e, t));
+    }
+  }
   const words = useMemo(() => ({ today: t('chat.today'), yesterday: t('chat.yesterday'), months: d.chat.months }), [t, d]);
 
   function openHeader() {
     if (!conv) return;
     if (conv.type === 'clan' && conv.clanId) router.push(`/clan/${conv.clanId}`);
+    else if (conv.type === 'event' && conv.eventId) router.push(`/event/${conv.eventId}`);
     else if (conv.otherUser) router.push(`/user/${conv.otherUser.id}`);
   }
 
   function menuActions(m: ChatItem): SheetAction[] {
-    const mine = String(m.sender.id) === String(user?.id);
+    if (isSystem(m) || !m.sender) return [];
+    const sender = m.sender;
+    const mine = sameId(sender.id, user?.id);
     if (mine && m.status === 'failed' && m.clientId) {
       return [
         { label: t('chat.retry'), onPress: () => deliver(m.clientId!, m.text) },
         { label: t('chat.discard'), destructive: true, onPress: () => setItems((cur) => dropPending(cur, m.clientId!)) },
       ];
     }
-    if (mine || isLocal(m)) return [];
-    return [
-      { label: t('chat.openProfile'), onPress: () => router.push(`/user/${m.sender.id}`) },
-      { label: t('chat.reportMessage'), destructive: true, onPress: () => router.push({ pathname: '/report', params: { targetType: 'message', targetId: String(m.id) } }) },
-    ];
+    if (isLocal(m)) return [];
+    const out: SheetAction[] = [];
+    if (canPinMessage(conv, m)) {
+      out.push(pinned && sameId(pinned.message.id, m.id)
+        ? { label: t('chat.unpin'), onPress: unpin }
+        : { label: t('chat.pin'), onPress: () => pin(m) });
+    }
+    if (mine) {
+      if (canDeleteMessage(m, user?.id, { readOnly })) out.push({ label: t('chat.deleteMessage'), destructive: true, onPress: () => del(m) });
+      return out;
+    }
+    if (m.deletedAt) return out;
+    out.push({ label: t('chat.openProfile'), onPress: () => router.push(`/user/${sender.id}`) });
+    out.push({ label: t('chat.reportMessage'), destructive: true, onPress: () => router.push({ pathname: '/report', params: { targetType: 'message', targetId: String(m.id) } }) });
+    return out;
   }
 
   const header = (
@@ -173,15 +269,44 @@ function Chat() {
         onBack={() => goBack('/chat')}
         backLabel={t('chat.title')}
         right={conv ? (
-          <Pressable onPress={openHeader} accessibilityRole="link" accessibilityLabel={isClan ? t('chat.openClan') : t('chat.openProfile')} hitSlop={6}>
-            {isClan
-              ? <ClanLogo clan={{ id: conv.clanId ?? conv.id, tag: conv.title.slice(0, 2).toLocaleUpperCase(), logoUrl: conv.avatarUrl }} size={36} />
-              : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={36} />}
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <IconButton
+              icon={muted ? 'bellOff' : 'bell'}
+              label={muted ? t('chat.unmute') : t('chat.mute')}
+              onPress={toggleMute}
+              disabled={muteBusy}
+              color={muted ? c.label2 : c.tint}
+            />
+            <Pressable
+              onPress={openHeader}
+              accessibilityRole="link"
+              accessibilityLabel={isClan ? t('chat.openClan') : isEvent ? t('chat.openEvent') : t('chat.openProfile')}
+              hitSlop={6}
+              style={{ minWidth: TAP, minHeight: TAP, alignItems: 'center', justifyContent: 'center' }}
+            >
+              {isClan
+                ? <ClanLogo clan={{ id: conv.clanId ?? conv.id, tag: conv.title.slice(0, 2).toLocaleUpperCase(), logoUrl: conv.avatarUrl }} size={36} />
+                : isEvent
+                  ? <Thumb seed={conv.eventId ?? conv.id} uri={photoUri(conv.avatarUrl)} icon="events" size={36} rounded={10} />
+                  : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={36} />}
+            </Pressable>
+          </View>
         ) : null}
         title={conv?.title}
-        subtitle={isClan ? t('chat.clanChat') : undefined}
+        subtitle={isClan ? t('chat.clanChat') : isEvent ? t('chat.eventChat') : muted ? t('chat.muted') : undefined}
       />
+      {pinned ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 16, paddingRight: 6, minHeight: 52, borderTopWidth: HAIRLINE, borderTopColor: c.separator }}>
+          <Icon name="pinMsg" size={18} color={c.tint} />
+          <View style={{ flex: 1, minWidth: 0 }} accessible accessibilityLabel={`${t('chat.pinned')}: ${pinned.message.sender ? `${pinned.message.sender.displayName}: ` : ''}${messageText(pinned.message, t)}`}>
+            <Txt variant="caption" tone="tint">{t('chat.pinned')}</Txt>
+            <Txt variant="subhead" numberOfLines={1}>
+              {pinned.message.sender ? `${pinned.message.sender.displayName}: ` : ''}{messageText(pinned.message, t)}
+            </Txt>
+          </View>
+          {conv?.canPin && !readOnly ? <IconButton icon="close" label={t('chat.unpin')} onPress={unpin} color={c.label2} /> : null}
+        </View>
+      ) : null}
     </View>
   );
 
@@ -229,7 +354,7 @@ function Chat() {
           renderItem={({ item }) => (
             <RowView
               row={item}
-              clan={isClan}
+              clan={group}
               words={words}
               hasMenu={item.kind === 'msg' && menuActions(item.msg).length > 0}
               onMenu={(m) => (menuActions(m).length ? setMenu(m) : null)}
@@ -238,17 +363,27 @@ function Chat() {
         />
       )}
       {sendError ? <Txt variant="footnote" tone="destructive" center role="alert" style={{ paddingHorizontal: 16, paddingTop: 6 }}>{sendError}</Txt> : null}
-      <Composer
-        value={text}
-        onChange={setText}
-        onSend={send}
-        placeholder={isClan ? t('chat.placeholderClan') : t('chat.placeholder')}
-        bottom={insets.bottom}
-        disabled={!loaded}
-      />
+      {note ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite" style={{ paddingHorizontal: 16, paddingTop: 6 }}>{note}</Txt> : null}
+      {readOnly ? (
+        <View style={{ borderTopWidth: HAIRLINE, borderTopColor: c.separator, backgroundColor: c.bg, paddingTop: 12, paddingBottom: 12 + insets.bottom, paddingHorizontal: 16, flexDirection: 'row', gap: 8, justifyContent: 'center', alignItems: 'center' }}>
+          <Icon name="lock" size={16} color={c.label2} />
+          <Txt variant="footnote" tone="label2" accessibilityLiveRegion="polite" style={{ flexShrink: 1 }}>
+            {conv?.readOnlyUntil ? t('chat.readOnlyUntil', { date: formatDate(conv.readOnlyUntil) }) : t('chat.readOnly')}
+          </Txt>
+        </View>
+      ) : (
+        <Composer
+          value={text}
+          onChange={setText}
+          onSend={send}
+          placeholder={isClan ? t('chat.placeholderClan') : isEvent ? t('chat.placeholderEvent') : t('chat.placeholder')}
+          bottom={insets.bottom}
+          disabled={!loaded}
+        />
+      )}
       <ActionSheet
         visible={!!menu}
-        title={menu ? `${menu.sender.displayName}: ${menu.text.slice(0, 80)}` : undefined}
+        title={menu ? `${menu.sender?.displayName ?? ''}: ${messageText(menu, t).slice(0, 80)}` : undefined}
         actions={menu ? menuActions(menu) : []}
         onClose={() => setMenu(null)}
       />
@@ -263,6 +398,17 @@ function RowView({ row, clan, words, onMenu, hasMenu }: {
 }) {
   const { c } = useTheme();
   const { t } = useI18n();
+  if (row.kind === 'system') {
+    const text = systemText(row.msg, t);
+    return (
+      <View style={{ alignItems: 'center', paddingVertical: 6, paddingHorizontal: 24 }}>
+        <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: c.fill, maxWidth: 520 }}
+          accessible accessibilityLabel={`${t('chat.systemMessage')}: ${text}, ${formatTime(row.msg.createdAt)}`}>
+          <Txt variant="footnote" tone="label2" center>{text}</Txt>
+        </View>
+      </View>
+    );
+  }
   if (row.kind === 'day') {
     return (
       <View style={{ alignItems: 'center', paddingVertical: 10 }}>
@@ -273,6 +419,8 @@ function RowView({ row, clan, words, onMenu, hasMenu }: {
     );
   }
   const { msg, mine, firstOfRun, lastOfRun } = row;
+  const sender = msg.sender!;
+  const deleted = !!msg.deletedAt;
   const showAvatar = clan && !mine;
   const failed = msg.status === 'failed';
   const sending = msg.status === 'sending';
@@ -281,20 +429,20 @@ function RowView({ row, clan, words, onMenu, hasMenu }: {
     ? { borderTopRightRadius: firstOfRun ? R : 6, borderBottomRightRadius: lastOfRun ? R : 6 }
     : { borderTopLeftRadius: firstOfRun ? R : 6, borderBottomLeftRadius: lastOfRun ? R : 6 };
   const time = formatTime(msg.createdAt);
-  const a11y = [mine ? t('chat.you') : msg.sender.displayName, msg.text, time, sending ? t('chat.sending') : failed ? t('chat.failed') : null]
+  const a11y = [mine ? t('chat.you') : sender.displayName, deleted ? t('chat.deleted') : msg.text, time, sending ? t('chat.sending') : failed ? t('chat.failed') : null]
     .filter(Boolean).join(', ');
   return (
     <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: 8, marginTop: firstOfRun ? 8 : 2 }}>
       {showAvatar ? (
         lastOfRun ? (
-          <Pressable onPress={() => router.push(`/user/${msg.sender.id}`)} accessibilityRole="link" accessibilityLabel={msg.sender.displayName}>
-            <Avatar uri={photoUri(msg.sender.avatarUrl)} name={msg.sender.displayName} size={30} />
+          <Pressable onPress={() => router.push(`/user/${sender.id}`)} accessibilityRole="link" accessibilityLabel={sender.displayName}>
+            <Avatar uri={photoUri(sender.avatarUrl)} name={sender.displayName} size={30} />
           </Pressable>
         ) : <View style={{ width: 30 }} />
       ) : null}
       <View style={{ maxWidth: '78%', alignItems: mine ? 'flex-end' : 'flex-start', gap: 2 }}>
         {showAvatar && firstOfRun ? (
-          <Txt variant="caption" tone="label2" style={{ paddingHorizontal: 12 }} numberOfLines={1}>{msg.sender.displayName}</Txt>
+          <Txt variant="caption" tone="label2" style={{ paddingHorizontal: 12 }} numberOfLines={1}>{sender.displayName}</Txt>
         ) : null}
         <Pressable
           onLongPress={hasMenu ? () => { tapFeedback(); onMenu(msg); } : undefined}
@@ -308,7 +456,9 @@ function RowView({ row, clan, words, onMenu, hasMenu }: {
           style={({ pressed }) => [
             {
               paddingHorizontal: 12, paddingVertical: 8, borderRadius: R,
-              backgroundColor: mine ? c.tint : c.card,
+              backgroundColor: deleted ? 'transparent' : mine ? c.tint : c.card,
+              borderWidth: deleted ? 1 : 0,
+              borderColor: c.separator,
               opacity: sending ? 0.7 : 1,
             },
             bubbleRadius,
@@ -316,8 +466,12 @@ function RowView({ row, clan, words, onMenu, hasMenu }: {
             pressed && { opacity: 0.8 },
           ]}
         >
-          <Txt color={mine ? c.onTint : c.label} selectable style={typeScale.body}>{msg.text}</Txt>
-          <Txt variant="caption" color={mine ? c.onTint : c.label2} style={{ alignSelf: 'flex-end', opacity: 0.75, marginTop: 2, fontWeight: '400' }}>
+          {deleted ? (
+            <Txt tone="label2" style={[typeScale.body, { fontStyle: 'italic' }]}>{t('chat.deleted')}</Txt>
+          ) : (
+            <Txt color={mine ? c.onTint : c.label} selectable style={typeScale.body}>{msg.text}</Txt>
+          )}
+          <Txt variant="caption" color={deleted ? c.label2 : mine ? c.onTint : c.label2} style={{ alignSelf: 'flex-end', opacity: 0.75, marginTop: 2, fontWeight: '400' }}>
             {sending ? t('chat.sending') : time}
           </Txt>
         </Pressable>

@@ -140,7 +140,7 @@ export function TextField({ label, hint, error, right, suffix, multiline, style,
           accessibilityHint={hint}
           placeholderTextColor={c.label3}
           multiline={multiline}
-          style={[type.body, { flex: 1, color: c.label, alignSelf: 'stretch', outlineWidth: 0 } as object, multiline && { minHeight: 100, paddingVertical: 14, textAlignVertical: 'top' }, style]}
+          style={[type.body, { flex: 1, color: c.label, alignSelf: 'stretch', outlineWidth: 0, outlineStyle: 'none' } as object, multiline && { minHeight: 100, paddingVertical: 14, textAlignVertical: 'top' }, style]}
           {...rest}
         />
         {suffix ? <Txt tone="label2" style={{ marginLeft: 6 }}>{suffix}</Txt> : null}

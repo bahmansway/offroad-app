@@ -7,7 +7,7 @@ import { useI18n } from '../lib/i18n';
 import { errorMessage } from '../lib/errors';
 import type { ReportTarget } from '../lib/types';
 
-const TARGETS: ReportTarget[] = ['spot', 'car', 'user', 'message', 'clan'];
+const TARGETS: ReportTarget[] = ['spot', 'car', 'user', 'message', 'clan', 'event'];
 
 export default function ReportScreen() {
   const { targetType, targetId } = useLocalSearchParams<{ targetType: string; targetId: string }>();

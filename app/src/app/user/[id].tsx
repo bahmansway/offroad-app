@@ -7,7 +7,9 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
 import { useAsync } from '../../lib/useAsync';
-import { chatErrorMessage, errorMessage } from '../../lib/errors';
+import { chatErrorMessage, errorMessage, inviteErrorMessage } from '../../lib/errors';
+import { canInviteUser } from '../../lib/permissions';
+import { successFeedback } from '../../lib/haptics';
 import { formatDate, sameId } from '../../lib/format';
 import { HAIRLINE } from '../../lib/theme';
 import { getSendMessageHandler } from '../../lib/chatHooks';
@@ -26,6 +28,10 @@ export default function UserScreen() {
   const [dmBusy, setDmBusy] = useState(false);
   const [blockBusy, setBlockBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [invited, setInvited] = useState(false);
+  // my own clan + role decides whether "Invite to clan" shows
+  const mine = useAsync(async () => (me && !sameId(me.id, id) ? (await api.user(me.id)).clan ?? null : null), [me?.id, id]);
 
   if (loading) return <LoadingState />;
   if (error || !u) return <NavScreen><ErrorState message={errorMessage(error, t)} onRetry={reload} /></NavScreen>;
@@ -46,6 +52,23 @@ export default function UserScreen() {
       setNote({ text: chatErrorMessage(e, t), error: true });
     } finally {
       setDmBusy(false);
+    }
+  }
+
+  async function invite() {
+    const myClan = mine.data;
+    if (!myClan) return;
+    setInviteBusy(true);
+    setNote(null);
+    try {
+      await api.inviteToClan(myClan.id, u!.id);
+      successFeedback();
+      setInvited(true);
+      setNote({ text: t('clan.inviteSent', { name: u!.displayName }), error: false });
+    } catch (e) {
+      setNote({ text: inviteErrorMessage(e, t), error: true });
+    } finally {
+      setInviteBusy(false);
     }
   }
 
@@ -82,6 +105,17 @@ export default function UserScreen() {
       {!isMe ? (
         <View style={{ gap: 6 }}>
           <PillButton title={t('profile.sendMessage')} icon="message" onPress={message} loading={dmBusy} disabled={!!u.isBlocked} />
+          {canInviteUser(mine.data, u, me?.id) ? (
+            <PillButton
+              title={t('clan.inviteToClan')}
+              icon="invite"
+              variant="tinted"
+              onPress={invite}
+              loading={inviteBusy}
+              disabled={invited}
+              accessibilityLabel={`${t('clan.inviteToClan')}: ${mine.data!.name}`}
+            />
+          ) : null}
           {soon ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite">{t('profile.messageSoon')}</Txt> : null}
           {note ? (
             <Txt variant="footnote" tone={note.error ? 'destructive' : 'label2'} center role={note.error ? 'alert' : undefined} accessibilityLiveRegion="polite">{note.text}</Txt>
@@ -103,7 +137,7 @@ export default function UserScreen() {
         <Section header={t('clan.clanHeader')}>
           <Cell
             title={u.clan.name}
-            subtitle={`[${u.clan.tag}] · ${u.clan.role === 'leader' ? t('clan.leader') : t('clan.member')}`}
+            subtitle={`[${u.clan.tag}] · ${u.clan.role === 'leader' ? t('clan.leader') : u.clan.role === 'officer' ? t('clan.officer') : t('clan.member')}`}
             left={<ClanLogo clan={u.clan} size={40} />}
             onPress={() => router.push(`/clan/${u.clan!.id}`)}
             accessibilityRole="link"

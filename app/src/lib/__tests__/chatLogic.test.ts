@@ -218,3 +218,59 @@ describe('row keys', () => {
     expect(after).toBe(before);
   });
 });
+
+describe('v3: system, deleted, muted', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const v3 = require('../chatLogic') as typeof import('../chatLogic');
+  const sysMsg = (id: string, at: string): Message => ({
+    id, conversationId: 'c1', type: 'system', sender: null, text: 'x', createdAt: at, clientId: null, systemKey: 'event.joined', systemParams: { displayName: 'A' },
+  });
+  it('system messages get their own row and break runs', () => {
+    const rows = buildRows([
+      msg('m1', '2026-10-28T10:00:00.000Z'),
+      sysMsg('s1', '2026-10-28T10:00:30.000Z'),
+      msg('m2', '2026-10-28T10:01:00.000Z'),
+    ], 'u1');
+    expect(rows.map((r) => r.kind)).toEqual(['day', 'msg', 'system', 'msg']);
+    const m2 = rows[3] as Extract<typeof rows[number], { kind: 'msg' }>;
+    expect(m2.firstOfRun).toBe(true);
+  });
+  it('mergeMessages copes with system messages (no sender)', () => {
+    const items = mergeMessages([], [sysMsg('s1', '2026-10-28T10:00:00.000Z'), msg('m1', '2026-10-28T10:01:00.000Z')]);
+    expect(items.map((m) => m.id)).toEqual(['s1', 'm1']);
+  });
+  it('applyDeleted clears text and unpins', () => {
+    const items = mergeMessages([], [msg('m1', '2026-10-28T10:00:00.000Z')]);
+    const out = v3.applyDeleted(items, { id: 'm1', deletedAt: '2026-10-28T11:00:00.000Z' });
+    expect(out[0].text).toBe('');
+    expect(out[0].deletedAt).toBe('2026-10-28T11:00:00.000Z');
+    expect(v3.applyDeleted(items, { id: 'nope', deletedAt: 'x' })).toBe(items);
+    const pinned = { message: msg('m1', '2026-10-28T10:00:00.000Z'), pinnedBy: 'u1', pinnedAt: null };
+    expect(v3.pinnedAfterDelete(pinned, 'm1')).toBeNull();
+    expect(v3.pinnedAfterDelete(pinned, 'm2')).toBe(pinned);
+  });
+  it('muted chats are not counted and show no badge', () => {
+    const list = [conv('a', { unreadCount: 3 }), conv('b', { unreadCount: 5, muted: true })];
+    expect(totalUnread(list)).toBe(3);
+    expect(v3.visibleUnread(list[1])).toBe(0);
+    expect(v3.unreadAfterRead(8, list[0])).toBe(5);
+    expect(v3.unreadAfterRead(8, list[1])).toBe(8);
+    expect(v3.patchConversation(list, 'b', { muted: false })[1].muted).toBe(false);
+  });
+  it('conversation updates from system messages count as unread', () => {
+    const list = [conv('c1', { type: 'event' })];
+    const r = applyConversationUpdate(list, { id: 'c1', lastMessage: sysMsg('s9', '2026-10-28T12:00:00.000Z'), updatedAt: '2026-10-28T12:00:00.000Z' }, { myId: 'u1', openId: null });
+    expect(r.list[0].unreadCount).toBe(1);
+  });
+  it('preview renders system/deleted text via the callback and names the sender in event chats', () => {
+    const c = conv('c1', { type: 'event', lastMessage: msg('m1', '2026-10-28T10:00:00.000Z', other, null, 'hi') });
+    expect(previewText(c, 'u1', 'You')).toBe('Rauf: hi');
+    const s = conv('c1', { type: 'event', lastMessage: sysMsg('s1', '2026-10-28T10:00:00.000Z') });
+    expect(previewText(s, 'u1', 'You', () => 'A joined the event')).toBe('A joined the event');
+  });
+  it('deleted last message updates the list preview', () => {
+    const list = [conv('c1', { lastMessage: msg('m1', '2026-10-28T10:00:00.000Z') })];
+    const out = v3.applyDeletedToList(list, { id: 'm1', conversationId: 'c1', deletedAt: 'x' });
+    expect(out[0].lastMessage?.deletedAt).toBe('x');
+  });
+});

@@ -3,6 +3,7 @@ import { Linking, Platform, ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Hero } from '../../components/Hero';
+import { EventList } from '../../components/EventCard';
 import {
   Card, Cell, DifficultyBar, ErrorState, FormError, GlassView, IconButton, IconTile, LoadingState, PillButton,
   Section, StarRating, Txt,
@@ -137,6 +138,21 @@ export default function SpotScreen() {
               <Txt>{spot.description || t('spot.noDescription')}</Txt>
             </View>
           </Section>
+
+          <View style={{ gap: 10 }}>
+            <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20, textTransform: 'uppercase', letterSpacing: 0.2 }} accessibilityRole="header">
+              {t('events.upcomingHere')}
+            </Txt>
+            {spot.upcomingEvents?.length ? <EventList items={spot.upcomingEvents} /> : (
+              <Txt variant="subhead" tone="label2" style={{ paddingHorizontal: 20 }}>{t('events.noneHere')}</Txt>
+            )}
+            <PillButton
+              title={t('events.createHere')}
+              icon="events"
+              variant="tinted"
+              onPress={() => router.push(user ? { pathname: '/event/new', params: { spotId: String(spot.id) } } : '/login')}
+            />
+          </View>
 
           <Section header={t('spot.rateTitle')}>
             <View style={{ paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center' }}>

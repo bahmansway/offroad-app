@@ -11,7 +11,6 @@ export default function TabsLayout() {
   const { c } = useTheme();
   const { unread } = useChat();
   const badge = badgeText(unread);
-  const soon = ` (${t('common.comingSoon')})`;
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
@@ -21,7 +20,7 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: t('tabs.explore') }} />
-      <Tabs.Screen name="events" options={{ title: t('tabs.events'), tabBarAccessibilityLabel: t('tabs.events') + soon }} />
+      <Tabs.Screen name="events" options={{ title: t('tabs.events') }} />
       <Tabs.Screen name="garage" options={{ title: t('tabs.garage') }} />
       <Tabs.Screen
         name="chat"

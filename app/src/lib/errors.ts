@@ -1,4 +1,5 @@
 import { ApiError } from './apiClient';
+import { eventConflictKey } from './eventLogic';
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
@@ -34,9 +35,9 @@ export function errorMessage(e: unknown, t: T, context: ErrorContext = 'default'
 }
 
 /** Chat send errors → short sentence. In a clan chat 403 means "not a member any more"; in a DM it means blocked. */
-export function chatErrorMessage(e: unknown, t: T, kind: 'dm' | 'clan' | null = 'dm'): string {
+export function chatErrorMessage(e: unknown, t: T, kind: 'dm' | 'clan' | 'event' | null = 'dm'): string {
   if (e instanceof ApiError) {
-    if (e.code === 'FORBIDDEN') return kind === 'clan' ? t('chat.noAccess') : t('chat.blockedCannotSend');
+    if (e.code === 'FORBIDDEN') return kind === 'clan' || kind === 'event' ? t('chat.noAccess') : t('chat.blockedCannotSend');
     if (e.code === 'RATE_LIMITED') return t('chat.rateLimited');
     if (e.code === 'NOT_FOUND') return t('chat.noAccess');
   }
@@ -53,6 +54,8 @@ export function clanErrorMessage(e: unknown, t: T, kind: 'save' | 'action' = 'ac
       if (/clan with this (name|tag) already exists/i.test(m)) return t('clan.nameTaken');
       if (/already in (a|this) clan/i.test(m)) return t('clan.alreadyInClan');
       if (/^hand over leadership first/i.test(m)) return t('clan.leaderLeaveHint');
+      if (/clan is full/i.test(m)) return t('clan.full');
+      if (/invite has expired/i.test(m)) return t('clan.inviteExpired');
       return t('clan.changed');
     }
     if (e.code === 'FORBIDDEN' || e.code === 'NOT_FOUND') return t('clan.changed');
@@ -64,4 +67,49 @@ export function clanErrorMessage(e: unknown, t: T, kind: 'save' | 'action' = 'ac
 /** True for errors after which the clan page should reload itself. */
 export function clanShouldReload(e: unknown): boolean {
   return e instanceof ApiError && (e.status === 403 || e.status === 404 || e.status === 409);
+}
+
+/** Errors when inviting someone to my clan (POST /clans/:id/invites). */
+export function inviteErrorMessage(e: unknown, t: T): string {
+  if (e instanceof ApiError) {
+    const m = e.message;
+    if (e.code === 'CONFLICT') {
+      if (/pending invite/i.test(m) && /already has/i.test(m)) return t('clan.inviteAlready');
+      if (/already in (a|your) clan/i.test(m)) return t('clan.inviteInClan');
+      if (/pending invites/i.test(m)) return t('clan.inviteLimit');
+      return t('clan.changed');
+    }
+    if (e.code === 'FORBIDDEN') return /cannot invite/i.test(m) ? t('clan.inviteBlocked') : t('errors.forbidden');
+  }
+  return errorMessage(e, t);
+}
+
+/** Errors when accepting / declining an invite. */
+export function acceptInviteErrorMessage(e: unknown, t: T): string {
+  if (e instanceof ApiError) {
+    if (e.code === 'NOT_FOUND') return t('clan.inviteGone');
+    if (e.code === 'CONFLICT') {
+      if (/expired/i.test(e.message)) return t('clan.inviteExpired');
+      if (/full/i.test(e.message)) return t('clan.full');
+      if (/already in a clan/i.test(e.message)) return t('clan.alreadyInClan');
+    }
+  }
+  return errorMessage(e, t);
+}
+
+/** Event create / edit / join / leave / cancel errors → short sentence. */
+export function eventErrorMessage(e: unknown, t: T, action: 'save' | 'join' | 'other' = 'other'): string {
+  if (e instanceof ApiError) {
+    if (e.code === 'CONFLICT') {
+      const k = eventConflictKey(e.message);
+      return k ? t(`events.errors.${k}`) : t('errors.generic');
+    }
+    if (e.code === 'FORBIDDEN' && action === 'join') {
+      if (/removed you/i.test(e.message)) return t('events.errors.removed');
+      if (/own cars/i.test(e.message)) return t('events.errors.notYourCar');
+      return t('events.errors.forbidden');
+    }
+    if (e.code === 'NOT_FOUND') return t('events.gone');
+  }
+  return errorMessage(e, t, action === 'save' ? 'create' : 'default');
 }

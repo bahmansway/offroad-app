@@ -293,3 +293,32 @@ describe('realtime client', () => {
     expect(refresh).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('v3 socket events', () => {
+  it('forwards message:deleted, conversation:pinned, event:updated and clan:invite; ignores junk', async () => {
+    let sock: FakeSocket | null = null;
+    const got: string[] = [];
+    const c = createRealtimeClient({
+      url: 'http://x',
+      io: (_u, o) => (sock = new FakeSocket(o)),
+      getToken: async () => 'tok',
+      refresh: async () => null,
+      timers: fakeTimers(),
+      onMessageDeleted: (d) => got.push(`del:${d.id}`),
+      onPinned: (p) => got.push(`pin:${p.conversationId}:${p.pinned ? 'on' : 'off'}`),
+      onEventUpdated: (e) => got.push(`ev:${e.eventId}`),
+      onClanInvite: (i) => got.push(`inv:${i.id}`),
+    });
+    c.start();
+    await flush();
+    sock!.ready();
+    sock!.emit('message:deleted', { id: 'm1', conversationId: 'c1', deletedAt: 'x' });
+    sock!.emit('conversation:pinned', { conversationId: 'c1', pinned: null });
+    sock!.emit('event:updated', { eventId: 'e1' });
+    sock!.emit('clan:invite', { id: 'i1', clan: { id: 'k', name: 'K', tag: 'K', logoUrl: null }, invitedBy: null, createdAt: '', expiresAt: '' });
+    sock!.emit('message:deleted', null);
+    sock!.emit('event:updated', {});
+    expect(got).toEqual(['del:m1', 'pin:c1:off', 'ev:e1', 'inv:i1']);
+    c.stop();
+  });
+});

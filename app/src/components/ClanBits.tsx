@@ -42,6 +42,7 @@ export function ClanCell({ clan, onPress, last }: { clan: Clan; onPress: () => v
   const { t } = useI18n();
   const meta = clanMeta(clan, t);
   const badge = clan.myRole === 'leader' ? t('clan.leader')
+    : clan.myRole === 'officer' ? t('clan.officer')
     : clan.myRole === 'member' ? t('clan.member')
       : clan.myRole === 'pending' ? t('clan.request')
         : clan.isOpen ? t('clan.open') : t('clan.request');

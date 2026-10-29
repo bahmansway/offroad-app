@@ -50,15 +50,18 @@ export function isEventFull(e: Pick<EventSummary, 'carCount' | 'maxCars' | 'isFu
  * - login: logged out, event still open → "Log in to join"
  * - join / joinWaitlist: I can join (waitlist when full)
  * - organizer / going / waitlist: I am in
- * - closed: cancelled, finished or already started and I'm not in
+ * - closed: cancelled or finished (for everyone), or already started and I'm not in
  */
 export type JoinState = 'login' | 'join' | 'joinWaitlist' | 'organizer' | 'going' | 'waitlist' | 'closed';
 
 export function joinState(e: Ev, loggedIn: boolean, now: Date = new Date()): JoinState {
+  const phase = eventPhase(e, now);
+  // cancelled / finished: everyone sees the "closed" card (participants also get the read-only chat)
+  if (phase === 'cancelled' || phase === 'finished') return 'closed';
   if (e.myStatus === 'organizer') return 'organizer';
   if (e.myStatus === 'going') return 'going';
   if (e.myStatus === 'waitlist') return 'waitlist';
-  if (eventPhase(e, now) !== 'upcoming') return 'closed';
+  if (phase !== 'upcoming') return 'closed';
   if (!loggedIn) return 'login';
   return isEventFull(e) ? 'joinWaitlist' : 'join';
 }

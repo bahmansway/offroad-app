@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
-import { EmptyState, ErrorState, LoadingState, NavScreen, PillButton, SearchField, Section } from '../components/ui';
-import { ClanCell } from '../components/ClanBits';
+import { View } from 'react-native';
+import { Cell, EmptyState, ErrorState, LoadingState, NavScreen, PillButton, SearchField, Section, Txt } from '../components/ui';
+import { ClanCell, ClanLogo } from '../components/ClanBits';
+import { useChat } from '../lib/chat';
+import { formatDate } from '../lib/format';
+import { successFeedback } from '../lib/haptics';
+import { acceptInviteErrorMessage } from '../lib/errors';
+import type { MyClanInvite } from '../lib/types';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
@@ -44,7 +50,34 @@ export default function ClansScreen() {
   // every time the page is shown (first open, and back from a clan page)
   useFocusEffect(useCallback(() => { load(qRef.current); }, [load]));
 
-  const mine = items?.find((c) => c.myRole === 'leader' || c.myRole === 'member');
+  const chat = useChat();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  useFocusEffect(useCallback(() => { chat.reloadInvites(); }, [chat.reloadInvites]));
+
+  async function answer(inv: MyClanInvite, accept: boolean) {
+    setBusy(`${accept ? 'a' : 'd'}:${inv.id}`);
+    setNote(null);
+    try {
+      if (accept) {
+        const clan = await api.acceptInvite(inv.id);
+        successFeedback();
+        setNote({ text: t('clan.accepted', { name: clan.name }), error: false });
+        chat.reload(); // the clan chat appears
+      } else {
+        await api.declineInvite(inv.id);
+        setNote({ text: t('clan.declined'), error: false });
+      }
+    } catch (e) {
+      setNote({ text: acceptInviteErrorMessage(e, t), error: true });
+    } finally {
+      setBusy(null);
+      await chat.reloadInvites();
+      load(qRef.current);
+    }
+  }
+
+  const mine = items?.find((c) => c.myRole === 'leader' || c.myRole === 'officer' || c.myRole === 'member');
   const pending = items?.filter((c) => c.myRole === 'pending') ?? [];
   const others = items?.filter((c) => c !== mine && c.myRole !== 'pending') ?? [];
   const create = () => router.push(user ? '/clan/new' : '/login');
@@ -57,6 +90,35 @@ export default function ClansScreen() {
       right={!mine ? <PillButton title={t('clan.createShort')} icon="plus" variant="tinted" size="small" onPress={create} accessibilityLabel={t('clan.create')} /> : null}
     >
       <SearchField value={q} onChangeText={setQ} placeholder={t('clan.search')} label={t('clan.search')} />
+      {user && chat.invites?.length ? (
+        <Section header={t('clan.incoming')}>
+          {chat.invites.map((inv) => (
+            <View key={inv.id}>
+              <Cell
+                title={`${inv.clan.name} [${inv.clan.tag}]`}
+                subtitle={inv.invitedBy
+                  ? t('clan.invitedBy', { name: inv.invitedBy.displayName, date: formatDate(inv.expiresAt) })
+                  : t('clan.invitedNoName', { date: formatDate(inv.expiresAt) })}
+                left={<ClanLogo clan={inv.clan} size={44} />}
+                onPress={() => router.push(`/clan/${inv.clan.id}`)}
+                accessibilityRole="link"
+                last
+              />
+              <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 12, paddingLeft: 74 }}>
+                <PillButton title={t('clan.decline')} variant="gray" size="small" style={{ flex: 1 }}
+                  accessibilityLabel={t('clan.declineA11y', { name: inv.clan.name })}
+                  loading={busy === `d:${inv.id}`} disabled={!!busy} onPress={() => answer(inv, false)} />
+                <PillButton title={t('clan.accept')} size="small" style={{ flex: 1 }}
+                  accessibilityLabel={t('clan.acceptA11y', { name: inv.clan.name })}
+                  loading={busy === `a:${inv.id}`} disabled={!!busy} onPress={() => answer(inv, true)} />
+              </View>
+            </View>
+          ))}
+        </Section>
+      ) : null}
+      {note ? (
+        <Txt variant="subhead" tone={note.error ? 'destructive' : 'label2'} center role={note.error ? 'alert' : undefined} accessibilityLiveRegion="polite">{note.text}</Txt>
+      ) : null}
       {!user ? <EmptyState icon="lock" title={t('clan.loginPrompt')} actionLabel={t('common.login')} onAction={() => router.push('/login')} style={{ paddingVertical: 8 }} /> : null}
       {error ? <ErrorState message={errorMessage(error, t)} onRetry={() => load(q)} /> : items === null ? <LoadingState inline /> : null}
       {mine ? (
