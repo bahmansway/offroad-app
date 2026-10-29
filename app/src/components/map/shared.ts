@@ -31,8 +31,12 @@ export interface MapProps {
   label: string;
   /** accessible name for each pin */
   pinLabel: (spot: Spot) => string;
-  /** shown if tiles fail to load */
+  /** @deprecated the map now shows MapErrorCard (az/en copy) when tiles fail; kept so old calls compile */
   failedText?: string;
+  /** small map (event page): error card without icon and without the retry button */
+  errorCompact?: boolean;
+  /** keep the error card clear of floating controls (search bar, bottom sheet, side buttons) */
+  errorInsets?: { top?: number; bottom?: number; left?: number; right?: number };
   ref?: React.Ref<MapHandle>;
   /** light/dark map style and pin colours (default light) */
   scheme?: Scheme;
@@ -46,22 +50,34 @@ export interface PinData {
   html: string;
   label: string;
   kind: 'spot' | 'picked';
+  /** CSS class list from `pinClass` (our own constant, never user text) */
+  className: string;
 }
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-/** Pin look from the mockups: round glass pins with the level number; the new-spot pin is solid tint. */
+/**
+ * Pin look (DESIGN-PASS P4): trail = white teardrop (40×48) with the level number (800) and a dark hairline;
+ * camp = forest teardrop with a white tent; picked/selected = tint teardrop, white glyph, white 2 px border;
+ * cluster (`.or-cluster`, for later) = ink circle, 3 px white border, count. Hit area is 44×48.
+ */
 export function pinCss(scheme: Scheme = 'light'): string {
   const c = palettes[scheme];
   return `
-.or-pin{width:44px;height:44px;box-sizing:border-box;border-radius:22px;border:0.5px solid ${c.glassBorder};
-background:${c.glass};-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
-display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;color:${c.label};
-font:700 16px -apple-system,Inter,system-ui,sans-serif;box-shadow:0 8px 28px rgba(0,0,0,${c.shadowOpacity})}
-.or-pin:focus-visible{outline:3px solid ${c.tint};outline-offset:2px}
-.or-pin--picked{background:${c.tint};color:${c.onTint};border:3px solid ${c.card};animation:or-pop .18s ease-out}
+.or-pin{position:relative;width:44px;height:48px;box-sizing:border-box;padding:0;border:0;background:transparent;cursor:pointer;
+filter:drop-shadow(0 4px 8px rgba(0,0,0,${Math.min(0.4, c.shadowOpacity + 0.12)}))}
+.or-pin .or-drop{position:absolute;left:2px;top:0;width:40px;height:48px;overflow:visible}
+.or-pin .or-drop path{fill:#FFFFFF;stroke:rgba(0,0,0,0.38);stroke-width:1}
+.or-pin .or-num{position:absolute;left:0;right:0;top:9px;text-align:center;color:#1C1C1E;font:800 15px/20px -apple-system,Inter,system-ui,sans-serif}
+.or-pin .or-glyph{position:absolute;left:12px;top:8px;width:20px;height:20px;color:#FFFFFF}
+.or-pin--camp .or-drop path{fill:${c.forest};stroke:#FFFFFF;stroke-width:2}
+.or-pin--picked .or-drop path{fill:${c.tint};stroke:#FFFFFF;stroke-width:2}
+.or-pin--picked{animation:or-pop .18s ease-out}
+.or-pin:focus-visible{outline:3px solid ${c.tint};outline-offset:2px;border-radius:8px}
+.or-cluster{width:44px;height:44px;box-sizing:border-box;border-radius:22px;border:3px solid #FFFFFF;background:#1C1C1E;color:#FFFFFF;
+font:800 15px -apple-system,Inter,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
 @keyframes or-pop{from{transform:scale(.6)}to{transform:scale(1)}}
 .maplibregl-ctrl-attrib{font:500 11px -apple-system,Inter,sans-serif}
 `;
@@ -70,12 +86,20 @@ font:700 16px -apple-system,Inter,system-ui,sans-serif;box-shadow:0 8px 28px rgb
 /** @deprecated kept for older imports; light pins. */
 export const PIN_CSS = pinCss('light');
 
-const TENT_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20 12 5l9 15Z M12 20l-3-5h6Z"/></svg>`;
-const PLUS_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
+const DROP_SVG = `<svg class="or-drop" viewBox="0 0 40 48" aria-hidden="true"><path d="M20 46C20 46 4 30 4 18a16 16 0 0 1 32 0c0 12-16 28-16 28Z"/></svg>`;
+const TENT_SVG = `<svg class="or-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20 12 5l9 15Z M12 20l-3-5h6Z"/></svg>`;
+const PLUS_SVG = `<svg class="or-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
 
+/** CSS class for a pin. */
+export function pinClass(kind: PinData['kind'], type?: Spot['type']): string {
+  if (kind === 'picked') return 'or-pin or-pin--picked';
+  return type === 'camp' ? 'or-pin or-pin--camp' : 'or-pin';
+}
+
+/** Inner HTML of a spot pin: teardrop + escaped level number, or teardrop + tent for camps. */
 export function spotPinInner(spot: Pick<Spot, 'type' | 'difficulty'>): string {
-  if (spot.type === 'camp') return TENT_SVG;
-  return escapeHtml(String(spot.difficulty ?? '?'));
+  if (spot.type === 'camp') return DROP_SVG + TENT_SVG;
+  return `${DROP_SVG}<span class="or-num">${escapeHtml(String(spot.difficulty ?? '?'))}</span>`;
 }
 
 export function buildPins(props: Pick<MapProps, 'spots' | 'picked' | 'pinLabel'>, pickedLabel = ''): PinData[] {
@@ -87,6 +111,7 @@ export function buildPins(props: Pick<MapProps, 'spots' | 'picked' | 'pinLabel'>
         lat: s.lat,
         lng: s.lng,
         kind: 'spot' as const,
+        className: pinClass('spot', s.type),
         label: props.pinLabel(s),
         html: spotPinInner(s),
       };
@@ -97,8 +122,9 @@ export function buildPins(props: Pick<MapProps, 'spots' | 'picked' | 'pinLabel'>
       lat: props.picked.lat,
       lng: props.picked.lng,
       kind: 'picked',
+      className: pinClass('picked'),
       label: pickedLabel,
-      html: PLUS_SVG,
+      html: DROP_SVG + PLUS_SVG,
     });
   }
   return pins;

@@ -3,7 +3,7 @@ import { Platform, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_800ExtraBold } from '@expo-google-fonts/inter';
 import { I18nProvider } from '../lib/i18n';
 import { AuthProvider } from '../lib/auth';
 import { ChatProvider } from '../lib/chat';
@@ -12,7 +12,7 @@ import { palettes } from '../lib/theme';
 import { OfflineBanner } from '../components/OfflineBanner';
 
 // iOS uses the system font, so fonts are only loaded on Android and web.
-const FONTS = Platform.OS === 'ios' ? {} : { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold };
+const FONTS = Platform.OS === 'ios' ? {} : { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_800ExtraBold };
 
 function AppStack() {
   const { c, scheme } = useTheme();

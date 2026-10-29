@@ -2,12 +2,11 @@ import React from 'react';
 import { ActivityIndicator, Pressable, View, type PressableProps, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from '../../lib/themeContext';
 import { TAP } from '../../lib/theme';
-import { tapFeedback } from '../../lib/haptics';
 import { Icon, type IconName } from './Icon';
 import { Txt } from './Text';
 import { GlassView } from './Glass';
 
-export type PillVariant = 'filled' | 'tinted' | 'gray' | 'plain' | 'destructive' | 'glass';
+export type PillVariant = 'filled' | 'tinted' | 'gray' | 'plain' | 'destructive' | 'glass' | 'secondary';
 
 export interface PillButtonProps extends Omit<PressableProps, 'style' | 'children'> {
   title: string;
@@ -23,16 +22,17 @@ export interface PillButtonProps extends Omit<PressableProps, 'style' | 'childre
 const HEIGHT = { large: 56, medium: 48, small: TAP } as const;
 
 /** Rounded pill button. `filled` = main action (tint), `tinted` = soft tint, `gray` = neutral fill,
- *  `plain` = text only, `destructive` = red text on card, `glass` = floating over a map/photo. */
+ *  `plain` = text only, `destructive` = red text on card, `glass` = floating over a map/photo,
+ *  `secondary` = white (card) pill with tint text, next to a filled main action in a bottom bar. */
 export function PillButton({
   title, subtitle, variant = 'filled', size = 'large', icon, loading, disabled, style, onPress, ...rest
 }: PillButtonProps) {
   const { c } = useTheme();
   const fg = {
-    filled: c.onTint, tinted: c.tintSoftText, gray: c.label, plain: c.tint, destructive: c.destructive, glass: c.tint,
+    filled: c.onTint, tinted: c.tintSoftText, gray: c.label, plain: c.tint, destructive: c.destructive, glass: c.tint, secondary: c.tint,
   }[variant];
   const bg = {
-    filled: c.tint, tinted: c.tintSoft, gray: c.fill, plain: 'transparent', destructive: c.card, glass: 'transparent',
+    filled: c.tint, tinted: c.tintSoft, gray: c.fill, plain: 'transparent', destructive: c.card, glass: 'transparent', secondary: c.card,
   }[variant];
   const h = HEIGHT[size];
   const inner = loading ? <ActivityIndicator color={fg} /> : (
@@ -45,10 +45,8 @@ export function PillButton({
     </View>
   );
   const off = !!disabled || !!loading;
-  const press = (e: Parameters<NonNullable<PressableProps['onPress']>>[0]) => {
-    tapFeedback();
-    onPress?.(e);
-  };
+  // No haptics on ordinary buttons (DESIGN-PASS P10); screens add success/warning where it matters.
+  const press = (e: Parameters<NonNullable<PressableProps['onPress']>>[0]) => onPress?.(e);
   if (variant === 'glass') {
     return (
       <GlassView elevated style={[{ height: h, borderRadius: h / 2 }, style]}>
@@ -73,6 +71,7 @@ export function PillButton({
       onPress={press}
       style={({ pressed }) => [
         { minHeight: h, borderRadius: h / 2, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: bg },
+        variant === 'secondary' && { shadowColor: c.shadow, shadowOpacity: c.shadowOpacity * 0.7, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
         off && { opacity: 0.5 },
         pressed && { opacity: 0.75 },
         style,
@@ -95,7 +94,7 @@ export function IconButton({ icon, label, onPress, color, glass, size = TAP, sty
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
-      onPress={() => { tapFeedback(); onPress?.(); }}
+      onPress={onPress}
       hitSlop={4}
       style={({ pressed }) => [
         { width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center' },

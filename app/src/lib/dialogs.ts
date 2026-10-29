@@ -1,7 +1,10 @@
 import { Alert, Platform } from 'react-native';
+import { warningFeedback } from './haptics';
 
-/** Yes/no question that works on phones and in the browser. */
+/** Yes/no question for a destructive action (delete, leave, remove). Works on phones and in the browser.
+ *  Gives a warning haptic on phones. */
 export function confirmAsync(message: string, okLabel: string, cancelLabel: string): Promise<boolean> {
+  warningFeedback();
   if (Platform.OS === 'web') {
     return Promise.resolve(typeof window !== 'undefined' ? window.confirm(message) : false);
   }

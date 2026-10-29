@@ -60,7 +60,7 @@ export default function ChatTab() {
           {dms.map((c) => <ConversationCell key={c.id} conv={c} />)}
         </Section>
       ) : conversations && !clanChats.length && !events.length ? (
-        <EmptyState icon="chat" title={t('chat.noChatsTitle')} text={t('chat.noChatsText')} />
+        <EmptyState illustration="mountain" title={t('chat.noChatsTitle')} text={t('chat.noChatsText')} actionLabel={t('chat.browseClans')} onAction={() => router.push('/clans')} />
       ) : null}
     </LargeTitleScreen>
   );
@@ -97,7 +97,7 @@ function ConversationCell({ conv, last }: { conv: Conversation; last?: boolean }
   const left = conv.type === 'clan'
     ? <ClanLogo clan={{ id: conv.clanId ?? conv.id, tag: initialsOf(conv.title), logoUrl: conv.avatarUrl }} size={52} />
     : conv.type === 'event'
-      ? <Thumb seed={conv.eventId ?? conv.id} uri={photoUri(conv.avatarUrl)} icon="events" size={52} rounded={14} />
+      ? <Thumb kind="event" uri={photoUri(conv.avatarUrl)} size={52} rounded={14} />
       : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={52} />;
   const label = [
     conv.type === 'clan' ? `${t('chat.clanChat')}: ${conv.title}` : conv.type === 'event' ? `${t('chat.eventChat')}: ${conv.title}` : conv.title,

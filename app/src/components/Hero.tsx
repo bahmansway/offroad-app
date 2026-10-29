@@ -1,48 +1,46 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FloatingBack } from './ui/Screen';
+import { CarSilhouette, Contour, HillsArt } from './ui/Motifs';
+import { useTheme } from '../lib/themeContext';
 
-/** Photo header (or a simple illustration when there is no photo) with floating glass buttons. */
-export function Hero({ kind, height, fallback, right, photoUri, overlay }: {
+/**
+ * Photo header, or (no photo) soft hills / the 4x4 silhouette on stone, both with a faint white contour.
+ * Floating glass back button on the left, `right` buttons on the right.
+ */
+export function Hero({ kind, height, fallback, right, photoUri, overlay, bottomLeft }: {
   kind: 'hills' | 'car'; height: number; fallback: string; right?: React.ReactNode; photoUri?: string | null;
-  /** element in the bottom-right corner (e.g. photo count) */
+  /** element in the bottom-right corner (e.g. upload spinner) */
   overlay?: React.ReactNode;
+  /** element in the bottom-left corner (event date block, "add a photo" chip) */
+  bottomLeft?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const { c } = useTheme();
+  const bg = kind === 'hills' ? '#E9B48F' : c.stone;
   return (
-    <View style={{ height: height + insets.top, overflow: 'hidden', backgroundColor: kind === 'hills' ? '#E9B48F' : '#C9D4DA' }}>
+    <View style={{ height: height + insets.top, overflow: 'hidden', backgroundColor: bg }}>
       {photoUri ? (
         <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} resizeMode="cover" accessible={false} />
+      ) : kind === 'hills' ? (
+        <>
+          <HillsArt />
+          <Contour color="#FFFFFF" opacity={0.2} seed={2} width={390} height={250} />
+        </>
       ) : (
-        <Svg width="100%" height="100%" viewBox="0 0 390 300" preserveAspectRatio="xMidYMax slice" style={StyleSheet.absoluteFill} accessible={false}>
-          {kind === 'hills' ? (
-            <>
-              <Rect width={390} height={300} fill="#E9B48F" />
-              <Path d="M0 190 L80 120 L140 160 L210 80 L290 150 L340 110 L390 150 L390 300 L0 300 Z" fill="#B65A3C" />
-              <Path d="M0 230 L100 190 L190 220 L270 180 L390 220 L390 300 L0 300 Z" fill="#8E3F27" />
-              <Path d="M0 270 C120 250 240 290 390 260 L390 300 L0 300 Z" fill="#6E2F1D" />
-            </>
-          ) : (
-            <>
-              <Rect width={390} height={300} fill="#C9D4DA" />
-              <Path d="M0 210 L90 160 L170 190 L260 140 L390 180 L390 300 L0 300 Z" fill="#A7A08E" />
-              <Path d="M0 255 C130 240 260 265 390 248 L390 300 L0 300 Z" fill="#8A7F68" />
-              <Path d="M110 230 L120 198 L150 182 L250 182 L272 202 L292 208 L292 230 Z" fill="#3B3F44" />
-              <Path d="M156 188 L176 188 L176 202 L148 202 Z M184 188 L240 188 L256 202 L184 202 Z" fill="#9FB3BF" />
-              <Circle cx={144} cy={232} r={15} fill="#1D1F22" />
-              <Circle cx={258} cy={232} r={15} fill="#1D1F22" />
-              <Circle cx={144} cy={232} r={6} fill="#6B6F75" />
-              <Circle cx={258} cy={232} r={6} fill="#6B6F75" />
-            </>
-          )}
-        </Svg>
+        <>
+          <Contour color="#FFFFFF" opacity={0.16} seed={4} width={390} height={220} />
+          <View style={{ position: 'absolute', left: 0, right: 0, top: insets.top + Math.max(40, height * 0.25), alignItems: 'center' }} pointerEvents="none">
+            <CarSilhouette width={Math.min(210, height * 0.95)} />
+          </View>
+        </>
       )}
       <View style={{ position: 'absolute', left: 16, right: 16, top: insets.top + 12, flexDirection: 'row', justifyContent: 'space-between' }}>
         <FloatingBack fallback={fallback} />
         <View style={{ flexDirection: 'row', gap: 8 }}>{right}</View>
       </View>
+      {bottomLeft ? <View style={{ position: 'absolute', left: 16, bottom: 14 }}>{bottomLeft}</View> : null}
       {overlay ? <View style={{ position: 'absolute', right: 16, bottom: 14 }}>{overlay}</View> : null}
     </View>
   );

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, Switch, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from '../../lib/themeContext';
-import { HAIRLINE, radius, TAP } from '../../lib/theme';
+import { HAIRLINE, radius, TAP, terrain, type TerrainTone } from '../../lib/theme';
 import { Icon, type IconName } from './Icon';
 import { Txt } from './Text';
 
@@ -45,12 +45,14 @@ export function Card({ children, style, padded = true }: { children: React.React
   return <View style={[{ backgroundColor: c.card, borderRadius: radius.card, overflow: 'hidden' }, padded && { padding: 16, gap: 12 }, style]}>{children}</View>;
 }
 
-/** Rounded square with an icon (settings rows). `bg` = solid colour + white icon; omit for soft tint. */
-export function IconTile({ icon, bg, size = 30 }: { icon: IconName; bg?: string; size?: number }) {
+/** Rounded square with an icon (settings rows). `bg` = solid colour + white icon; omit for soft tint.
+ *  `tone` = terrain soft background + text colour (e.g. `stone` for mods). */
+export function IconTile({ icon, bg, size = 30, tone }: { icon: IconName; bg?: string; size?: number; tone?: TerrainTone }) {
   const { c } = useTheme();
+  const tt = tone ? terrain(c, tone) : null;
   return (
-    <View style={{ width: size, height: size, borderRadius: radius.iconTile, backgroundColor: bg ?? c.tintSoft, alignItems: 'center', justifyContent: 'center' }}>
-      <Icon name={icon} size={Math.round(size * 0.6)} color={bg ? '#FFFFFF' : c.tintSoftText} />
+    <View style={{ width: size, height: size, borderRadius: radius.iconTile, backgroundColor: bg ?? tt?.soft ?? c.tintSoft, alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name={icon} size={Math.round(size * 0.6)} color={bg ? '#FFFFFF' : tt?.text ?? c.tintSoftText} />
     </View>
   );
 }

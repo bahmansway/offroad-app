@@ -6,6 +6,7 @@ import { ErrorState, LoadingState as Loading } from '../../../components/ui';
 import { goBack } from '../../../components/ui';
 import { api } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
+import { successFeedback } from '../../../lib/haptics';
 import { useAsync } from '../../../lib/useAsync';
 import { errorMessage } from '../../../lib/errors';
 import { useAuth } from '../../../lib/auth';
@@ -26,6 +27,7 @@ export default function EditCarScreen() {
           backLabel={t('common.cancel')}
           onSubmit={async (input) => {
             await api.updateCar(id, input);
+            successFeedback();
             goBack(`/car/${id}`);
           }}
         />

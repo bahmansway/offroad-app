@@ -4,10 +4,11 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Hero } from '../../components/Hero';
 import {
-  Avatar, Badge, Card, Cell, DifficultyBar, EmptyState, ErrorState, GlassView, IconButton, IconTile, LoadingState,
+  Avatar, Badge, Card, Cell, DifficultySign, EmptyState, ErrorState, GlassView, IconButton, IconTile, LoadingState,
   NavScreen, PillButton, Section, Txt, useTheme,
 } from '../../components/ui';
-import { ActionSheet, type SheetAction } from '../../components/ActionSheet';
+import { ActionSheet, MoreMenu, type SheetAction } from '../../components/ActionSheet';
+import { EventDate, statusTone } from '../../components/EventCard';
 import { CarAndSeats } from '../../components/CarPicker';
 import { carTitle, photoUri } from '../../components/Rows';
 import SpotMap from '../../components/map/Map';
@@ -22,7 +23,7 @@ import { sameId } from '../../lib/format';
 import { pickPhoto } from '../../lib/photos';
 import { successFeedback } from '../../lib/haptics';
 import {
-  badgeTone, canCancel, canLeave, canRemoveParticipants, cardBadge, eventLevel, eventLocation, formatEventWhen, withZoneLabel,
+  canCancel, canLeave, canRemoveParticipants, cardBadge, eventLevel, eventLocation, formatEventWhen, withZoneLabel,
   joinState, placeName, placesLeft, splitParticipants, waitlistPosition,
 } from '../../lib/eventLogic';
 import type { CarSummary, EventDetail, EventParticipant, Id, Spot } from '../../lib/types';
@@ -257,26 +258,18 @@ export default function EventScreen() {
     );
   } else {
     // organizer / going / waitlist
-    const status = js === 'organizer' ? t('events.youOrganize') : js === 'going' ? t('events.youGoing') : pos ? t('events.youWaitlist', { n: pos }) : t('events.youWaitlistNoPos');
+    // organizer / going are shown once, as a chip under the hero; only the waitlist place is extra here
+    const status = js === 'waitlist' ? (pos ? t('events.youWaitlist', { n: pos }) : t('events.youWaitlistNoPos')) : null;
     mainArea = (
       <View style={{ gap: 10 }}>
-        <View style={{ alignItems: 'center' }}><Badge text={status} tone={js === 'waitlist' ? 'gray' : 'tint'} /></View>
-        {ev.conversationId ? <PillButton title={t('events.openChat')} icon="chat" onPress={() => router.push(`/chat/${ev.conversationId}`)} /> : null}
+        {status ? <View style={{ alignItems: 'center' }}><Badge text={status} tone="sand" /></View> : null}
         {canLeave(ev) ? (
           <PillButton title={js === 'waitlist' ? t('events.leaveWaitlist') : t('events.leave')} variant="gray" onPress={leave} loading={busy === 'leave'} />
         ) : null}
       </View>
     );
   }
-  // read-only chat after cancel/finish stays reachable for participants
-  if (js === 'closed' && ev.conversationId) {
-    mainArea = (
-      <View style={{ gap: 10 }}>
-        {mainArea}
-        <PillButton title={t('events.openChat')} icon="chat" variant="gray" onPress={() => router.push(`/chat/${ev.conversationId}`)} />
-      </View>
-    );
-  }
+  // the event chat (also read-only after cancel/finish) is the chat icon in the hero
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -286,33 +279,39 @@ export default function EventScreen() {
           height={220}
           fallback="/events"
           photoUri={photoUri(ev.coverUrl)}
-          right={isOrg ? (
-            ev.canEdit ? (
-              <GlassView elevated style={{ height: 44, borderRadius: 22, flexDirection: 'row' }}>
-                <IconButton icon="edit" label={t('events.edit')} onPress={() => router.push(`/event/edit/${ev.id}`)} style={{ backgroundColor: 'transparent', width: 48 }} />
-                <IconButton icon="camera" label={ev.coverUrl ? t('events.coverChange') : t('events.coverAdd')} onPress={changeCover} style={{ backgroundColor: 'transparent', width: 48 }} />
-              </GlassView>
-            ) : null
-          ) : (
-            <IconButton
-              icon="flag"
-              glass
-              label={t('events.report')}
-              onPress={() => router.push(user ? { pathname: '/report', params: { targetType: 'event', targetId: String(ev.id) } } : '/login')}
-            />
-          )}
+          bottomLeft={<EventDate iso={ev.startsAt} muted={ev.status !== 'scheduled'} />}
+          right={
+            <>
+              {ev.conversationId ? <IconButton icon="chat" glass label={t('events.openChat')} onPress={() => router.push(`/chat/${ev.conversationId}`)} /> : null}
+              {isOrg && ev.canEdit ? (
+                <GlassView elevated style={{ height: 44, borderRadius: 22, flexDirection: 'row' }}>
+                  <IconButton icon="edit" label={t('events.edit')} onPress={() => router.push(`/event/edit/${ev.id}`)} style={{ backgroundColor: 'transparent', width: 48 }} />
+                  <IconButton icon="camera" label={ev.coverUrl ? t('events.coverChange') : t('events.coverAdd')} onPress={changeCover} style={{ backgroundColor: 'transparent', width: 48 }} />
+                </GlassView>
+              ) : null}
+              {isOrg ? null : (
+                <MoreMenu
+                  title={ev.title}
+                  actions={[{ label: t('events.report'), destructive: true, onPress: () => router.push(user ? { pathname: '/report', params: { targetType: 'event', targetId: String(ev.id) } } : '/login') }]}
+                />
+              )}
+            </>
+          }
         />
         <View style={{ padding: 16, paddingTop: 20, gap: 20, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
           <View style={{ gap: 6, paddingHorizontal: 4 }}>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {badge ? <Badge text={t(`events.status.${badge}`)} tone={badgeTone(badge)} /> : null}
-              {ev.clan ? <Badge text={`[${ev.clan.tag}] ${ev.clan.name}`} tone={ev.visibility === 'clan' ? 'tint' : 'gray'} /> : null}
-              <Badge text={ev.visibility === 'clan' ? t('events.clanOnly') : t('events.public')} tone="gray" />
+              {badge === 'organizer' ? <Badge text={t('events.youOrganize')} tone="gray" />
+                : badge ? <Badge text={t(`events.status.${badge}`)} tone={statusTone(badge)} /> : null}
+              {ev.clan ? <Badge text={ev.visibility === 'clan' ? `${ev.clan.name} · ${t('events.clanOnly')}` : ev.clan.name} tone="stone" icon="people" />
+                : ev.visibility === 'clan' ? <Badge text={t('events.clanOnly')} tone="stone" /> : null}
             </View>
             <Txt variant="title1" accessibilityRole="header">{ev.title}</Txt>
-            <Txt variant="subhead" tone="tint" accessibilityRole="link" onPress={() => router.push(`/user/${ev.organizer.id}`)}>
-              {t('events.organizedBy', { name: ev.organizer.displayName })}
-            </Txt>
+            {isOrg ? null : (
+              <Txt variant="subhead" tone="tint" accessibilityRole="link" onPress={() => router.push(`/user/${ev.organizer.id}`)}>
+                {t('events.organizedBy', { name: ev.organizer.displayName })}
+              </Txt>
+            )}
           </View>
 
           <Section>
@@ -325,26 +324,28 @@ export default function EventScreen() {
               accessibilityRole={ev.spot ? 'link' : undefined}
               accessibilityLabel={ev.spot ? `${t('events.where')}: ${where}. ${t('events.openSpot')}` : undefined}
             />
+            {level ? (
+              <Cell
+                title={t('events.minLevel')}
+                subtitle={`${t('events.atLeast', { level: `${level} · ${d.levels.names[level - 1]}` })} — ${d.levels.explain[level - 1]}`}
+                left={<IconTile icon="car" />}
+                right={<DifficultySign level={level} variant="number" />}
+              />
+            ) : null}
             <Cell
               title={t('events.carsOf', { count: ev.carCount, max: ev.maxCars })}
               subtitle={[t('events.people', { count: ev.participantCount }), ev.waitlistCount ? t('events.waiting', { count: ev.waitlistCount }) : null].filter(Boolean).join(' · ')}
-              left={<IconTile icon="car" />}
+              left={<IconTile icon="people" />}
             />
           </Section>
 
           {loc ? (
             <View style={{ gap: 8 }}>
               <View style={{ height: 170, borderRadius: 20, overflow: 'hidden' }} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-                <SpotMap spots={NO_SPOTS} picked={loc} center={loc} zoom={11} label={where} pinLabel={() => where} failedText={t('map.loadFailed')} />
+                <SpotMap spots={NO_SPOTS} picked={loc} center={loc} zoom={11} label={where} pinLabel={() => where} errorCompact />
               </View>
               <PillButton title={t('events.openInMaps')} icon="navigate" variant="gray" size="medium" onPress={openMaps} />
             </View>
-          ) : null}
-
-          {level ? (
-            <Card>
-              <DifficultyBar level={level} word={d.levels.names[level - 1]} label={t('events.minLevel')} caption={d.levels.explain[level - 1]} />
-            </Card>
           ) : null}
 
           {ev.requirements.length ? (
@@ -389,17 +390,6 @@ export default function EventScreen() {
             </Section>
           ) : null}
 
-          {user && !isOrg ? (
-            <Section>
-              <Cell
-                title={t('events.report')}
-                destructive
-                center
-                chevron={false}
-                onPress={() => router.push({ pathname: '/report', params: { targetType: 'event', targetId: String(ev.id) } })}
-              />
-            </Section>
-          ) : null}
         </View>
       </ScrollView>
       <ActionSheet

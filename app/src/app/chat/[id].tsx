@@ -287,7 +287,7 @@ function Chat() {
               {isClan
                 ? <ClanLogo clan={{ id: conv.clanId ?? conv.id, tag: conv.title.slice(0, 2).toLocaleUpperCase(), logoUrl: conv.avatarUrl }} size={36} />
                 : isEvent
-                  ? <Thumb seed={conv.eventId ?? conv.id} uri={photoUri(conv.avatarUrl)} icon="events" size={36} rounded={10} />
+                  ? <Thumb kind="event" uri={photoUri(conv.avatarUrl)} size={36} rounded={10} />
                   : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={36} />}
             </Pressable>
           </View>

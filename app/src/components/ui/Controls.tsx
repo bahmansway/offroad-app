@@ -1,14 +1,18 @@
 import React from 'react';
 import { Pressable, ScrollView, TextInput, View, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
 import { useTheme } from '../../lib/themeContext';
-import { difficultySegments, type, TAP } from '../../lib/theme';
-import { tapFeedback } from '../../lib/haptics';
-import { Icon } from './Icon';
+import { difficultySegments, font, signColors, terrain, type, TAP, type TerrainTone } from '../../lib/theme';
+import { selectionFeedback } from '../../lib/haptics';
+import { Icon, type IconName } from './Icon';
 import { Txt } from './Text';
 import { GlassView } from './Glass';
 import { useI18n } from '../../lib/i18n';
 
-export interface SegOption<T> { value: T; label: string; a11y?: string }
+export interface SegOption<T> {
+  value: T; label: string; a11y?: string;
+  /** small decorative glyph before the label (e.g. trail in clay, tent in forest) */
+  icon?: IconName; iconColor?: string;
+}
 
 /**
  * iOS segmented control. `glass` puts it on a frosted pill (over the map).
@@ -31,14 +35,17 @@ export function SegmentedControl<T extends string | number>({ options, value, on
             accessibilityRole="radio"
             accessibilityState={{ checked: on }}
             accessibilityLabel={o.a11y ?? o.label}
-            onPress={() => { if (!on) { tapFeedback(); onChange(o.value); } }}
+            onPress={() => { if (!on) { selectionFeedback(); onChange(o.value); } }}
             hitSlop={{ top: compact ? 4 : 0, bottom: compact ? 4 : 0 }}
             style={[
               { flexGrow: 1, minWidth: compact ? 56 : 44, height: h - pad * 2, paddingHorizontal: compact ? 12 : 16, borderRadius: (h - pad * 2) / 2, alignItems: 'center', justifyContent: 'center' },
               on && { backgroundColor: c.segOn, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
             ]}
           >
-            <Txt variant="subhead" style={{ fontWeight: on ? '600' : '500' }} numberOfLines={1}>{o.label}</Txt>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {o.icon ? <Icon name={o.icon} size={16} color={o.iconColor ?? c.label} strokeWidth={2.4} /> : null}
+              <Txt variant="subhead" style={{ fontWeight: on ? '600' : '500' }} numberOfLines={1}>{o.label}</Txt>
+            </View>
           </Pressable>
         );
       })}
@@ -61,7 +68,7 @@ export function ChoicePills<T extends string | number>({ options, value, onChang
         accessibilityRole="radio"
         accessibilityState={{ checked: on }}
         accessibilityLabel={o.a11y ?? o.label}
-        onPress={() => { tapFeedback(); onChange(o.value); }}
+        onPress={() => { selectionFeedback(); onChange(o.value); }}
         style={({ pressed }) => [
           { height: TAP, minWidth: 64, paddingHorizontal: 14, borderRadius: TAP / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tint : c.card },
           pressed && { opacity: 0.75 },
@@ -182,12 +189,107 @@ export function DifficultyBar({ level, word, label, caption, compact }: {
   );
 }
 
-/** Soft-tint badge "2 · Orta" used in list rows. */
-export function Badge({ text, tone = 'tint' }: { text: string; tone?: 'tint' | 'gray' }) {
+export type BadgeTone = 'tint' | 'gray' | TerrainTone;
+
+/** Soft capsule ("Hazırkı", "Açıq"). Tones: `tint`, `gray`, or a terrain tone (`clay | forest | sand | stone`,
+ *  soft background + text colour). Optional decorative `icon`. Terrain tones are category colour only. */
+export function Badge({ text, tone = 'tint', icon }: { text: string; tone?: BadgeTone; icon?: IconName }) {
   const { c } = useTheme();
+  const { bg, fg } = tone === 'tint' ? { bg: c.tintSoft, fg: c.tintSoftText }
+    : tone === 'gray' ? { bg: c.fill, fg: c.label2 }
+      : (() => { const x = terrain(c, tone); return { bg: x.soft, fg: x.text }; })();
   return (
-    <View style={{ height: 28, minWidth: 28, paddingHorizontal: 10, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: tone === 'tint' ? c.tintSoft : c.fill }}>
-      <Txt variant="footnote" color={tone === 'tint' ? c.tintSoftText : c.label2} style={{ fontWeight: '700' }} numberOfLines={1}>{text}</Txt>
+    <View style={{ height: 28, minWidth: 28, paddingHorizontal: 10, borderRadius: 14, flexDirection: 'row', gap: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: bg, flexShrink: 1 }}>
+      {icon ? <Icon name={icon} size={14} color={fg} strokeWidth={2.4} /> : null}
+      <Txt variant="footnote" color={fg} style={font('700')} numberOfLines={1}>{text}</Txt>
+    </View>
+  );
+}
+
+/**
+ * Trail-sign difficulty badge (DESIGN-PASS P1): a plate with a number square and the level word.
+ * The plate gets darker as the level goes up, and number + word are always shown (never colour only).
+ * `size` small 28 (rows) / large 36 (detail pages). `short` uses the short words in tight rows
+ * (the screen-reader label keeps the full name). `variant="number"` = just the number plate (pickers).
+ */
+export function DifficultySign({ level, size = 'small', short, variant = 'full', style }: {
+  level: number | null | undefined; size?: 'small' | 'large'; short?: boolean; variant?: 'full' | 'number'; style?: StyleProp<ViewStyle>;
+}) {
+  const { scheme } = useTheme();
+  const { t, d } = useI18n();
+  const col = signColors(level, scheme);
+  if (!col || !level) return null;
+  const h = size === 'large' ? 36 : 28;
+  const full = d.levels.names[level - 1];
+  const word = short ? d.levels.short[level - 1] : full;
+  const ring = col.ring ? { borderWidth: 2, borderColor: col.ring } : null;
+  return (
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={`${t('spot.difficulty')}: ${level} · ${full}`}
+      style={[{
+        height: h, borderRadius: 8, backgroundColor: col.plate, flexDirection: 'row', alignItems: 'center', alignSelf: 'center',
+        paddingLeft: ring ? 1 : 3, paddingRight: variant === 'number' ? (ring ? 1 : 3) : size === 'large' ? 12 : 9, gap: size === 'large' ? 8 : 6,
+      }, ring, style]}
+    >
+      <View style={{ width: h - 6 - (ring ? 4 : 0), height: h - 6 - (ring ? 4 : 0), borderRadius: 6, backgroundColor: col.numBg, alignItems: 'center', justifyContent: 'center' }}>
+        <Txt color={col.num} style={[font('800'), { fontSize: size === 'large' ? 17 : 14, lineHeight: size === 'large' ? 20 : 17 }]}>{level}</Txt>
+      </View>
+      {variant === 'full' ? (
+        <Txt color={col.text} numberOfLines={1} style={[font('700'), { fontSize: size === 'large' ? 15 : 13, lineHeight: size === 'large' ? 20 : 17, flexShrink: 1 }]}>{word}</Txt>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * Small calendar page for events (DESIGN-PASS P5), 60 wide: month strip (20 px, tint when `soon`,
+ * paper otherwise, grey when `muted`), day number 26/800, weekday spelled out (11 px).
+ * Decorative: put the full date in the parent's accessibility label.
+ */
+export function DateBlock({ month, day, weekday, soon, muted, width = 60, style }: {
+  month: string; day: string; weekday?: string; soon?: boolean; muted?: boolean; width?: number; style?: StyleProp<ViewStyle>;
+}) {
+  const { c } = useTheme();
+  const strip = muted ? { bg: c.fill2, fg: c.label } : soon ? { bg: c.tint, fg: c.onTint } : { bg: c.paper, fg: c.paperText };
+  return (
+    <View
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
+      style={[{ width, borderRadius: 14, overflow: 'hidden', backgroundColor: c.card, borderWidth: 1, borderColor: soon && !muted ? c.tint : c.separator, alignItems: 'center', alignSelf: 'flex-start' }, style]}
+    >
+      <View style={{ height: 20, alignSelf: 'stretch', backgroundColor: strip.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <Txt color={strip.fg} style={[font('800'), { fontSize: 11, lineHeight: 14, letterSpacing: 0.8 }]} numberOfLines={1}>{month}</Txt>
+      </View>
+      <Txt color={muted ? c.label2 : c.label} style={[font('800'), { fontSize: 26, lineHeight: 30, marginTop: 2 }]}>{day}</Txt>
+      {weekday ? (
+        <Txt tone="label2" center numberOfLines={2} style={[font('600'), { fontSize: 11, lineHeight: 13, paddingHorizontal: 2, paddingBottom: 6 }]}>{weekday}</Txt>
+      ) : <View style={{ height: 6 }} />}
+    </View>
+  );
+}
+
+/** Seats: up to 4 participant dots, "3/6 maşın" and a thin 4 px progress bar. `text` is the visible label. */
+export function SeatBar({ count, max, text, style }: { count: number; max: number; text: string; style?: StyleProp<ViewStyle> }) {
+  const { c } = useTheme();
+  const dots = [c.clay, c.forest, c.stone, c.sand].slice(0, Math.max(0, Math.min(count, 4)));
+  const pct = max > 0 ? Math.max(0, Math.min(1, count / max)) : 0;
+  return (
+    <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 8 }, style]} accessible accessibilityLabel={text}>
+      {dots.length ? (
+        <View style={{ flexDirection: 'row' }}>
+          {dots.map((bg, i) => (
+            <View key={i} style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: bg, borderWidth: 2, borderColor: c.card, marginLeft: i ? -8 : 0, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="car" size={11} color="#FFFFFF" strokeWidth={2.4} svgOnly />
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <Txt variant="footnote" tone="label2" style={font('500')} numberOfLines={1}>{text}</Txt>
+      <View style={{ flex: 1, maxWidth: 80, height: 4, borderRadius: 2, backgroundColor: c.fill2, overflow: 'hidden' }}>
+        <View style={{ width: `${pct * 100}%`, height: 4, backgroundColor: c.tint }} />
+      </View>
     </View>
   );
 }
@@ -217,12 +319,30 @@ export function StarRating({ value, onChange, size = 15, label, labelFor, disabl
           accessibilityLabel={labelFor?.(n) ?? String(n)}
           accessibilityState={{ checked: value === n, disabled: !!disabled }}
           disabled={disabled}
-          onPress={() => { tapFeedback(); onChange(n); }}
+          onPress={() => { selectionFeedback(); onChange(n); }}
           style={({ pressed }) => [{ width: TAP, height: TAP, alignItems: 'center', justifyContent: 'center' }, pressed && { opacity: 0.6 }]}
         >
           <Icon name={n <= value ? 'starFill' : 'star'} size={size} color={c.tint} strokeWidth={1.8} />
         </Pressable>
       ))}
+    </View>
+  );
+}
+
+/** Small fact tile (spot page: Season / Length / Events): terrain-tone icon square, label, value.
+ *  Hide the tile when there is no value — never show "Not specified". */
+export function FactTile({ icon, label, value, tone = 'stone', style }: {
+  icon: IconName; label: string; value: string; tone?: TerrainTone; style?: StyleProp<ViewStyle>;
+}) {
+  const { c } = useTheme();
+  const x = terrain(c, tone);
+  return (
+    <View style={[{ flex: 1, minWidth: 96, backgroundColor: c.card, borderRadius: 16, padding: 12, gap: 6 }, style]} accessible accessibilityLabel={`${label}: ${value}`}>
+      <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: x.soft, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={icon} size={16} color={x.text} />
+      </View>
+      <Txt variant="footnote" tone="label2" numberOfLines={1}>{label}</Txt>
+      <Txt variant="subhead" style={font('600')} numberOfLines={2}>{value}</Txt>
     </View>
   );
 }

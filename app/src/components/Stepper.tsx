@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, View } from 'react-native';
 import { useTheme } from '../lib/themeContext';
 import { TAP } from '../lib/theme';
-import { tapFeedback } from '../lib/haptics';
+import { selectionFeedback } from '../lib/haptics';
 import { Icon } from './ui/Icon';
 import { Txt } from './ui/Text';
 
@@ -14,7 +14,7 @@ export function Stepper({ value, onChange, min, max, label, valueText, minusLabe
   const { c } = useTheme();
   const set = (n: number) => {
     const v = Math.min(max, Math.max(min, n));
-    if (v !== value) { tapFeedback(); onChange(v); }
+    if (v !== value) { selectionFeedback(); onChange(v); }
   };
   const btn = (icon: 'minus' | 'plus', l: string, disabled: boolean, fn: () => void) => (
     <Pressable

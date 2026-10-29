@@ -1,9 +1,10 @@
 import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { BAKU_CENTER, DEFAULT_ZOOM, buildPins, mapStyleUrl, pinCss, type MapProps } from './shared';
-import { palettes, type } from '../../lib/theme';
+import { palettes } from '../../lib/theme';
+import { MapErrorCard } from '../ui/States';
 import { useTheme } from '../../lib/themeContext';
 
 function injectCss(scheme: 'light' | 'dark') {
@@ -24,6 +25,8 @@ export default function SpotMap(props: MapProps) {
   const cb = useRef(props);
   cb.current = props;
   const [failed, setFailed] = useState(false);
+  /** bumping this rebuilds the map ("Try again" on the error card) */
+  const [attempt, setAttempt] = useState(0);
   const { scheme: themeScheme } = useTheme();
   const scheme = props.scheme ?? themeScheme;
   const pal = palettes[scheme];
@@ -77,7 +80,7 @@ export default function SpotMap(props: MapProps) {
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
 
   // Light/dark switch: swap the tile style and pin colours without rebuilding the map.
   useEffect(() => {
@@ -103,7 +106,7 @@ export default function SpotMap(props: MapProps) {
     markers.current = buildPins(props, props.label).map((p) => {
       const el = document.createElement('button');
       el.type = 'button';
-      el.className = p.kind === 'picked' ? 'or-pin or-pin--picked' : 'or-pin';
+      el.className = p.className;
       el.setAttribute('aria-label', p.label);
       el.innerHTML = p.html;
       if (p.kind === 'picked') {
@@ -115,17 +118,22 @@ export default function SpotMap(props: MapProps) {
           cb.current.onSpotPress?.(p.id);
         });
       }
-      return new maplibregl.Marker({ element: el, anchor: 'bottom-left' }).setLngLat([p.lng, p.lat]).addTo(map);
+      return new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(map);
     });
-  }, [props.spots, props.picked?.lat, props.picked?.lng, props.pinLabel]);
+  }, [props.spots, props.picked?.lat, props.picked?.lng, props.pinLabel, attempt]);
 
   return (
     <View style={[styles.wrap, { backgroundColor: pal.mapBg }]} accessibilityRole="none" aria-label={props.label} role="region">
       <div ref={holder} style={{ position: 'absolute', inset: 0 }} />
-      {failed && props.failedText ? (
-        <View style={styles.failed} pointerEvents="none">
-          <Text style={[styles.failedText, { color: pal.label }]}>{props.failedText}</Text>
-        </View>
+      {failed ? (
+        <MapErrorCard
+          style={[StyleSheet.absoluteFill, props.errorInsets ? {
+            paddingTop: props.errorInsets.top, paddingBottom: props.errorInsets.bottom,
+            paddingLeft: props.errorInsets.left, paddingRight: props.errorInsets.right,
+          } : null]}
+          compact={props.errorCompact}
+          onRetry={props.errorCompact ? undefined : () => { setFailed(false); styleShown.current = scheme; setAttempt((a) => a + 1); }}
+        />
       ) : null}
     </View>
   );
@@ -133,6 +141,4 @@ export default function SpotMap(props: MapProps) {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: 'hidden' },
-  failed: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  failedText: { ...type.subhead, textAlign: 'center' },
 });

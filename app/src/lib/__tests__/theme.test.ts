@@ -48,8 +48,10 @@ describe('theme tokens', () => {
       picked: null,
       pinLabel: () => 'x',
     });
-    expect(pins[0].html).toBe('3');
+    expect(pins[0].html).toContain('<span class="or-num">3</span>');
+    expect(pins[0].className).toBe('or-pin');
     expect(pins[1].html).toContain('<svg');
+    expect(pins[1].className).toBe('or-pin or-pin--camp');
   });
 });
 

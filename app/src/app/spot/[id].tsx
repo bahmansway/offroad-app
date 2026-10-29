@@ -5,9 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Hero } from '../../components/Hero';
 import { EventList } from '../../components/EventCard';
 import {
-  Card, Cell, DifficultyBar, ErrorState, FormError, GlassView, IconButton, IconTile, LoadingState, PillButton,
-  Section, StarRating, Txt,
+  Badge, Card, DifficultyBar, DifficultySign, ErrorState, FactTile, FormError, IconButton, LoadingState, PillButton,
+  Section, SectionHeader, StarRating, Txt,
 } from '../../components/ui';
+import { MoreMenu, type SheetAction } from '../../components/ActionSheet';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -15,7 +16,7 @@ import { useTheme } from '../../lib/themeContext';
 import { useAsync, useRefocus } from '../../lib/useAsync';
 import { errorMessage } from '../../lib/errors';
 import { confirmAsync } from '../../lib/dialogs';
-import { distanceFromBaku, formatDistance, formatNumber, formatRating, sameId } from '../../lib/format';
+import { distanceFromBaku, formatAvg, formatDistance, sameId } from '../../lib/format';
 
 export default function SpotScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -78,8 +79,14 @@ export default function SpotScreen() {
   }
 
   const level = spot.type === 'trail' && spot.difficulty ? spot.difficulty : null;
-  const avg = spot.ratingAvg != null ? formatNumber(Math.round(spot.ratingAvg * 10) / 10, lang) : formatRating(null);
-  const ratedText = spot.ratingCount > 0 ? t('spot.ratingValue', { avg, count: spot.ratingCount }) : t('spot.notRated');
+  const avg = formatAvg(spot.ratingAvg, lang);
+  const upcoming = spot.upcomingEvents ?? [];
+  const isTrail = spot.type === 'trail';
+  const report = () => router.push(user ? { pathname: '/report', params: { targetType: 'spot', targetId: String(spot.id) } } : '/login');
+  const menu: SheetAction[] = isOwner
+    ? [{ label: t('common.delete'), destructive: true, onPress: remove }]
+    : [{ label: t('spot.report'), destructive: true, onPress: report }];
+  const createEvent = () => router.push(user ? { pathname: '/event/new', params: { spotId: String(spot.id) } } : '/login');
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -88,71 +95,73 @@ export default function SpotScreen() {
           kind="hills"
           height={250}
           fallback="/"
-          right={isOwner ? (
-            <GlassView elevated style={{ height: 44, borderRadius: 22, flexDirection: 'row' }}>
-              <IconButton icon="edit" label={t('common.edit')} onPress={() => router.push(`/spot/edit/${spot.id}`)} style={{ backgroundColor: 'transparent', width: 48 }} />
-              <IconButton icon="trash" label={t('common.delete')} onPress={remove} color={c.destructive} style={{ backgroundColor: 'transparent', width: 48 }} />
-            </GlassView>
-          ) : (
-            <IconButton
-              icon="flag"
-              glass
-              label={t('spot.report')}
-              onPress={() => router.push(user ? { pathname: '/report', params: { targetType: 'spot', targetId: String(spot.id) } } : '/login')}
-            />
-          )}
+          right={
+            <>
+              {isOwner ? <IconButton icon="edit" glass label={t('common.edit')} onPress={() => router.push(`/spot/edit/${spot.id}`)} /> : null}
+              <MoreMenu actions={menu} title={spot.name} />
+            </>
+          }
         />
-        <View style={{ padding: 16, paddingTop: 20, gap: 20, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
-          <View style={{ gap: 4, paddingHorizontal: 4 }}>
-            <Txt variant="largeTitle" accessibilityRole="header">{spot.name}</Txt>
-            <Txt variant="subhead" tone="label2">
-              {spot.type === 'trail' ? t('spot.trail') : t('spot.camp')}
-              {' · '}
-              <Txt variant="subhead" tone="tint" accessibilityRole="link" onPress={() => router.push(`/user/${spot.owner.id}`)}>
-                {t('spot.sharedBy', { name: spot.owner.displayName })}
-              </Txt>
-              {' · '}
-              {t('spot.fromBaku', { km: formatDistance(km, lang) })}
-            </Txt>
-          </View>
-
-          <Card>
-            {level ? (
-              <DifficultyBar level={level} word={d.levels.names[level - 1]} label={t('spot.difficulty')} caption={d.levels.explain[level - 1]} />
-            ) : (
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Txt variant="subhead" tone="label2">{t('spot.difficulty')}</Txt>
-                <Txt variant="headline">{t('spot.noDifficulty')}</Txt>
-              </View>
-            )}
-          </Card>
-
-          <Section>
-            <Cell title={t('spot.season')} value={spot.season || t('spot.anySeason')} left={<IconTile icon="season" />} minHeight={48} />
-            {spot.tags.length ? <Cell title={t('spot.tagsLabel')} value={spot.tags.join(', ')} left={<IconTile icon="tag" />} minHeight={48} /> : null}
-            <Cell title={t('spot.rating')} value={ratedText} left={<IconTile icon="star" />} minHeight={48} />
-          </Section>
-
-          <Section header={t('spot.description')}>
-            <View style={{ padding: 16 }}>
-              <Txt>{spot.description || t('spot.noDescription')}</Txt>
+        <View style={{ padding: 16, paddingTop: 18, gap: 14, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
+          <View style={{ gap: 8, paddingHorizontal: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Badge text={isTrail ? t('spot.trail') : t('spot.camp')} tone={isTrail ? 'clay' : 'forest'} icon={isTrail ? 'trail' : 'tent'} />
+              <Txt variant="subhead" tone="label2">{t('spot.fromBaku', { km: formatDistance(km, lang) })}</Txt>
             </View>
-          </Section>
-
-          <View style={{ gap: 10 }}>
-            <Txt variant="footnote" tone="label2" style={{ paddingHorizontal: 20, textTransform: 'uppercase', letterSpacing: 0.2 }} accessibilityRole="header">
-              {t('events.upcomingHere')}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+              <Txt variant="title1" accessibilityRole="header" style={{ flex: 1 }}>{spot.name}</Txt>
+              {spot.ratingCount > 0 ? (
+                <View style={{ alignItems: 'flex-end' }} accessible accessibilityLabel={`${t('spot.rating')}: ${t('spot.ratingValue', { avg, count: spot.ratingCount })}`}>
+                  <Txt variant="title3" style={{ fontWeight: '700' }}>{`★ ${avg}`}</Txt>
+                  <Txt variant="footnote" tone="label2">{t('car.votes', { count: spot.ratingCount })}</Txt>
+                </View>
+              ) : null}
+            </View>
+            <Txt variant="subhead" tone="tint" accessibilityRole="link" onPress={() => router.push(`/user/${spot.owner.id}`)}>
+              {t('spot.sharedBy', { name: spot.owner.displayName })}
             </Txt>
-            {spot.upcomingEvents?.length ? <EventList items={spot.upcomingEvents} /> : (
-              <Txt variant="subhead" tone="label2" style={{ paddingHorizontal: 20 }}>{t('events.noneHere')}</Txt>
-            )}
-            <PillButton
-              title={t('events.createHere')}
-              icon="events"
-              variant="tinted"
-              onPress={() => router.push(user ? { pathname: '/event/new', params: { spotId: String(spot.id) } } : '/login')}
-            />
           </View>
+
+          {level ? (
+            <Card>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Txt variant="footnote" tone="label2">{t('spot.difficulty')}</Txt>
+                  <Txt variant="subhead">{d.levels.explain[level - 1]}</Txt>
+                </View>
+                <DifficultySign level={level} size="large" />
+              </View>
+              <DifficultyBar level={level} word={d.levels.names[level - 1]} label={t('spot.difficulty')} compact />
+            </Card>
+          ) : null}
+
+          {spot.season || upcoming.length ? (
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {spot.season ? <FactTile icon="season" label={t('spot.season')} value={spot.season} tone="sand" /> : null}
+              {upcoming.length ? <FactTile icon="people" label={t('spot.eventsTile')} value={t('spot.eventsSoon', { count: upcoming.length })} tone="forest" /> : null}
+            </View>
+          ) : null}
+
+          {spot.tags.length ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 4 }} accessible accessibilityLabel={`${t('spot.tagsLabel')}: ${spot.tags.join(', ')}`}>
+              {spot.tags.map((tag) => <Badge key={tag} text={tag} tone="stone" />)}
+            </View>
+          ) : null}
+
+          {spot.description ? (
+            <Section header={t('spot.description')}>
+              <View style={{ padding: 16 }}>
+                <Txt>{spot.description}</Txt>
+              </View>
+            </Section>
+          ) : null}
+
+          {upcoming.length ? (
+            <View style={{ gap: 10 }}>
+              <SectionHeader title={t('events.upcomingHere')} />
+              <EventList items={upcoming} />
+            </View>
+          ) : null}
 
           <Section header={t('spot.rateTitle')}>
             <View style={{ paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center' }}>
@@ -172,6 +181,7 @@ export default function SpotScreen() {
 
       <View style={{ position: 'absolute', left: 16, right: 16, bottom: 24 + insets.bottom, flexDirection: 'row', gap: 10, maxWidth: 608, alignSelf: 'center' }}>
         <PillButton title={t('spot.navigate')} icon="navigate" onPress={navigate} style={{ flex: 1 }} />
+        <PillButton title={t('events.create')} variant="secondary" onPress={createEvent} />
       </View>
     </View>
   );

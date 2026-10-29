@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { EmptyState, ErrorState, LargeTitleScreen, LoadingState, PillButton, SegmentedControl } from '../../components/ui';
+import { EmptyState, ErrorState, LargeTitleScreen, LoadingState, PillButton, SectionHeader, SegmentedControl } from '../../components/ui';
 import { EventCard } from '../../components/EventCard';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { errorMessage } from '../../lib/errors';
+import { groupByWeek } from '../../lib/eventLogic';
 import type { EventScope, EventSummary } from '../../lib/types';
 
 const PAGE = 20;
@@ -123,6 +124,7 @@ export default function EventsTab() {
       ) : items.length === 0 ? (
         <EmptyState
           icon="events"
+          illustration={scope === 'upcoming' ? 'mountain' : undefined}
           title={empty.title}
           text={empty.text}
           actionLabel={scope !== 'past' ? t('events.create') : undefined}
@@ -130,7 +132,17 @@ export default function EventsTab() {
         />
       ) : (
         <View style={{ gap: 10 }}>
-          {items.map((e) => <EventCard key={e.id} event={e} />)}
+          {scope === 'past' ? items.map((e) => <EventCard key={e.id} event={e} />) : (() => {
+            const g = groupByWeek(items);
+            return (
+              <>
+                {g.thisWeek.length ? <SectionHeader title={t('events.thisWeek')} /> : null}
+                {g.thisWeek.map((e) => <EventCard key={e.id} event={e} />)}
+                {g.later.length ? <SectionHeader title={t('events.later')} style={g.thisWeek.length ? { marginTop: 8 } : undefined} /> : null}
+                {g.later.map((e) => <EventCard key={e.id} event={e} />)}
+              </>
+            );
+          })()}
           {cursor ? <PillButton title={t('events.loadMore')} variant="gray" onPress={loadMore} loading={more} /> : null}
         </View>
       )}

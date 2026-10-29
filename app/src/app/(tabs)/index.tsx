@@ -16,6 +16,7 @@ import { useTheme } from '../../lib/themeContext';
 import { radius } from '../../lib/theme';
 import { BAKU } from '../../lib/format';
 import { filterSpots, sortByDistance, type TypeFilter } from '../../lib/spotFilters';
+import { selectionFeedback, tapFeedback } from '../../lib/haptics';
 import type { Spot } from '../../lib/types';
 
 const NEAR_COUNT = 3;
@@ -70,6 +71,8 @@ export default function ExploreScreen() {
     [t],
   );
   const openSpot = useCallback((id: Spot['id']) => router.push(`/spot/${id}`), []);
+  const pinTap = useCallback((id: Spot['id']) => { tapFeedback(); router.push(`/spot/${id}`); }, []);
+  const sheetH = (showAll ? 460 : 300) + tabSpace;
   const levelActive = range[0] !== 1 || range[1] !== 5;
   const recenter = () => setCenter((p) => (p && p.lat === BAKU.lat ? { lat: BAKU.lat + 1e-7, lng: BAKU.lng } : { lat: BAKU.lat, lng: BAKU.lng }));
 
@@ -78,10 +81,10 @@ export default function ExploreScreen() {
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
         <SpotMap
           spots={visible}
-          onSpotPress={openSpot}
+          onSpotPress={pinTap}
           label={t('explore.mapLabel')}
           pinLabel={pinLabel}
-          failedText={t('map.loadFailed')}
+          errorInsets={{ top: insets.top + 120, bottom: sheetH, left: 16, right: 76 }}
           center={center}
           zoom={center ? 7 : undefined}
         />
@@ -103,8 +106,8 @@ export default function ExploreScreen() {
           onChange={setType}
           options={[
             { value: 'all', label: t('explore.all') },
-            { value: 'trail', label: t('explore.trails') },
-            { value: 'camp', label: t('explore.camps') },
+            { value: 'trail', label: t('explore.trails'), icon: 'trail', iconColor: c.clay },
+            { value: 'camp', label: t('explore.camps'), icon: 'tent', iconColor: c.forest },
           ]}
           style={{ alignSelf: 'center' }}
         />
@@ -124,7 +127,7 @@ export default function ExploreScreen() {
                       accessibilityLabel={`${n} — ${d.levels.names[n - 1]}`}
                       accessibilityState={{ checked: on, disabled }}
                       disabled={disabled}
-                      onPress={() => setRange((r) => (idx === 0 ? [n, r[1]] : [r[0], n]))}
+                      onPress={() => { if (!on) selectionFeedback(); setRange((r) => (idx === 0 ? [n, r[1]] : [r[0], n])); }}
                       style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tint : c.fill, opacity: disabled ? 0.35 : 1 }}
                     >
                       <Txt variant="headline" color={on ? c.onTint : c.label}>{n}</Txt>
@@ -152,7 +155,7 @@ export default function ExploreScreen() {
       <GlassView
         borderless
         style={{
-          position: 'absolute', left: 0, right: 0, bottom: 0, height: (showAll ? 460 : 300) + tabSpace,
+          position: 'absolute', left: 0, right: 0, bottom: 0, height: sheetH,
           borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, backgroundColor: c.sheet,
         }}
       >
@@ -169,7 +172,16 @@ export default function ExploreScreen() {
             {error ? <ErrorState message={errorMessage(error, t)} onRetry={load} /> : null}
             {!loaded && !error ? <LoadingState inline /> : null}
             {loaded && !error && list.length === 0 ? (
-              <EmptyState icon="explore" title={t('explore.empty')} style={{ paddingVertical: 12 }} />
+              spots.length === 0 && !debounced ? (
+                <EmptyState
+                  illustration="mountain"
+                  title={t('explore.emptyNearTitle')}
+                  text={t('explore.emptyNearText')}
+                  actionLabel={t('explore.addSpot')}
+                  onAction={() => router.push(user ? '/spot/new' : '/login')}
+                  style={{ paddingVertical: 12 }}
+                />
+              ) : <EmptyState icon="explore" title={t('explore.empty')} style={{ paddingVertical: 12 }} contour={false} />
             ) : null}
             {list.length > 0 ? (
               <Section>

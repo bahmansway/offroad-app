@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 import { useTheme } from '../../lib/themeContext';
 import { TAB_BAR, type } from '../../lib/theme';
-import { tapFeedback } from '../../lib/haptics';
+import { selectionFeedback } from '../../lib/haptics';
 import { GlassView } from './Glass';
 import { Icon, type IconName } from './Icon';
 import { Txt } from './Text';
@@ -44,7 +44,7 @@ export function FloatingTabBar({ state, descriptors, emitter, navigateToTab }: B
             const onPress = () => {
               const event = emitter.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
               if (!focused && !event.defaultPrevented) {
-                tapFeedback();
+                selectionFeedback();
                 navigateToTab(route.key);
               }
             };

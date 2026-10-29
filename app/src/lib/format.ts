@@ -133,3 +133,49 @@ export function initials(name: string | null | undefined): string {
 export function sameId(a: string | number | null | undefined, b: string | number | null | undefined): boolean {
   return a != null && b != null && String(a) === String(b);
 }
+
+/**
+ * Car money line (DESIGN-PASS P3).
+ * - Owner: the big number is the REAL total of every price (the server sends the owner all prices),
+ *   plus `othersSee` = the public total, only when some price is hidden from others.
+ * - Everyone else: only the server's public total; `othersSee` is null. Private prices never reach
+ *   non-owners (the server sends price=null), and this never sums mods for them.
+ */
+export function carTotalDisplay(
+  car: { mods: { price: number | null; currency: string; pricePublic: boolean }[]; totalPublicSpend: Partial<Record<string, number>>; hiddenPriceCount: number },
+  isOwner: boolean,
+  lang: Lang = 'az',
+): { total: string; othersSee: string | null } {
+  if (!isOwner) return { total: formatTotals(car.totalPublicSpend, lang), othersSee: null };
+  const hidden = car.mods.some((m) => m.price != null && !m.pricePublic) || car.hiddenPriceCount > 0;
+  return {
+    total: formatTotals(sumVisiblePrices(car.mods), lang),
+    othersSee: hidden ? formatTotals(car.totalPublicSpend, lang) : null,
+  };
+}
+
+/** Short date for lists: "bu gün" / "dünən" / "29 okt" (this year) / "29 okt 2025". Device-local day. */
+export function formatShortDate(
+  iso: string | null | undefined,
+  words: { today: string; yesterday: string; monthsShort: string[] },
+  lang: Lang = 'az',
+  now: Date = new Date(),
+): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400000);
+  if (diff === 0) return words.today;
+  if (diff === 1) return words.yesterday;
+  const mon = (words.monthsShort[d.getMonth()] ?? '').toLocaleLowerCase(lang === 'az' ? 'az' : 'en');
+  const base = `${d.getDate()} ${mon}`;
+  return d.getFullYear() === now.getFullYear() ? base : `${base} ${d.getFullYear()}`;
+}
+
+/** Average rating with one decimal in the app's number style: "4.0" (en) / "4,0" (az). null → "–". */
+export function formatAvg(avg: number | null | undefined, lang: Lang = 'az'): string {
+  if (avg == null || !Number.isFinite(avg)) return '–';
+  const s = (Math.round(avg * 10) / 10).toFixed(1);
+  return lang === 'az' ? s.replace('.', ',') : s;
+}

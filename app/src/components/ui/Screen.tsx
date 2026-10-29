@@ -10,6 +10,8 @@ import { radius, TAB_BAR, TAP } from '../../lib/theme';
 import { Txt } from './Text';
 import { Icon } from './Icon';
 import { IconButton } from './Button';
+import { Contour } from './Motifs';
+import { tapFeedback } from '../../lib/haptics';
 
 export function goBack(fallback: string = '/') {
   if (router.canGoBack()) router.back();
@@ -35,6 +37,8 @@ export function LargeTitleScreen({ title, right, children, onRefresh, refreshing
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const bottom = useTabBarSpace();
+  // Faint contour in the top-right corner behind the large title (tint 14%). The only decoration on a tab root.
+  const corner = <Contour color={c.tint} opacity={0.14} seed={3} width={260} height={140} style={{ left: undefined, bottom: undefined, top: -20, right: -40, width: 260, height: 140 }} />;
   const header = (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8, minHeight: 56 }}>
       <Txt variant="largeTitle" accessibilityRole="header" numberOfLines={1} style={{ flexShrink: 1 }}>{title}</Txt>
@@ -44,7 +48,8 @@ export function LargeTitleScreen({ title, right, children, onRefresh, refreshing
   const inner = [{ width: '100%' as const, maxWidth: MAX_W, alignSelf: 'center' as const, paddingHorizontal: 16, gap: 20 }, contentStyle];
   if (!scroll) {
     return (
-      <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top + 6 }}>
+      <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top + 6, overflow: 'hidden' }}>
+        {corner}
         <View style={{ width: '100%', maxWidth: MAX_W, alignSelf: 'center' }}>{header}</View>
         <View style={[inner, { flex: 1, paddingBottom: bottom }]}>{children}</View>
       </View>
@@ -55,8 +60,17 @@ export function LargeTitleScreen({ title, right, children, onRefresh, refreshing
       style={{ flex: 1, backgroundColor: c.bg }}
       contentContainerStyle={{ paddingTop: insets.top + 6, paddingBottom: bottom }}
       keyboardShouldPersistTaps="handled"
-      refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={c.label2} /> : undefined}
+      refreshControl={onRefresh ? (
+        <RefreshControl
+          refreshing={!!refreshing}
+          onRefresh={() => { tapFeedback(); onRefresh(); }}
+          tintColor={c.tint}
+          colors={[c.tint]}
+          progressBackgroundColor={c.card}
+        />
+      ) : undefined}
     >
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top + 140, overflow: 'hidden' }} pointerEvents="none">{corner}</View>
       <View style={{ width: '100%', maxWidth: MAX_W, alignSelf: 'center' }}>{header}</View>
       <View style={inner}>{children}</View>
     </ScrollView>
@@ -172,9 +186,10 @@ export function FloatingBack({ fallback = '/' }: { fallback?: string }) {
 }
 
 /** Plain page section title ("Modifications · 5" + action). */
-export function SectionHeader({ title, right }: { title: string; right?: React.ReactNode }) {
+export function SectionHeader({ title, right, style }: { title: string; right?: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+  // Right-side links share the header's baseline; they keep a 44 px hit area through hitSlop/minHeight.
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, minHeight: 28 }}>
+    <View style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, minHeight: 28 }, style]}>
       <Txt variant="footnote" tone="label2" style={{ textTransform: 'uppercase', letterSpacing: 0.2 }} accessibilityRole="header">{title}</Txt>
       {right}
     </View>

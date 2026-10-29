@@ -6,7 +6,7 @@ import { api } from '../../../lib/api';
 import { useChat } from '../../../lib/chat';
 import { useI18n } from '../../../lib/i18n';
 import { eventErrorMessage } from '../../../lib/errors';
-import { successFeedback } from '../../../lib/haptics';
+import { warningFeedback } from '../../../lib/haptics';
 import { EVENT_LIMITS } from '../../../lib/eventLogic';
 
 /** Sheet: cancel an event with an optional reason (shown in the event chat). */
@@ -23,7 +23,7 @@ export default function CancelEventScreen() {
     setError(null);
     try {
       await api.cancelEvent(id, reason.trim() || null);
-      successFeedback();
+      warningFeedback();
       chat.reload();
       goBack(`/event/${id}`);
     } catch (e) {

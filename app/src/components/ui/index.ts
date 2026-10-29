@@ -5,6 +5,7 @@ export * from './Glass';
 export * from './Button';
 export * from './List';
 export * from './Controls';
+export * from './Motifs';
 export * from './Avatar';
 export * from './States';
 export * from './Screen';

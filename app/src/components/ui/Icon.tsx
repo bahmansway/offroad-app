@@ -56,6 +56,10 @@ const ICONS = {
   clock: { sf: 'clock', d: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18Z M12 7v5l3 2' },
   invite: { sf: 'person.badge.plus', d: 'M10 11a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M3 20a7 7 0 0 1 11-5.7 M19 14v6 M16 17h6' },
   minus: { sf: 'minus', d: 'M5 12h14' },
+  trail: { sf: 'point.topleft.down.to.point.bottomright.curvepath', d: 'M4 19c4 0 4-6 8-6s4-8 8-8' },
+  route: { sf: 'arrow.triangle.swap', d: 'M6 19a2 2 0 1 0 0-4a2 2 0 1 0 0 4Z M18 9a2 2 0 1 0 0-4a2 2 0 1 0 0 4Z M8 17h6a3 3 0 0 0 0-6h-4a3 3 0 0 1 0-6h6' },
+  wifi: { sf: 'wifi.exclamationmark', d: 'M2 9a15 15 0 0 1 20 0 M5.5 12.5a10 10 0 0 1 13 0 M9 16a5 5 0 0 1 6 0 M12 19.5h.01' },
+  more: { sf: 'ellipsis', d: 'M3.2 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z M10.1 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z M17 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z', filled: true },
 } as const;
 
 export type IconName = keyof typeof ICONS;

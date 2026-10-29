@@ -26,7 +26,7 @@ export function Wordmark({ height = 28, style }: { height?: number; style?: Styl
   );
 }
 
-/** Just the mark (mountains + road), assets/brand/logo-mark.svg. */
+/** Just the mark (mountain + road), assets/brand/logo-mark.svg. */
 export function LogoMark({ size = 64, style }: { size?: number; style?: StyleProp<ViewStyle> }) {
   const { t } = useI18n();
   return (

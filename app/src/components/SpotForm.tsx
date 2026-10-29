@@ -5,7 +5,7 @@ import SpotMap from './map/Map';
 import type { MapHandle } from './map/shared';
 import { NavScreen, NavBar, goBack } from './ui/Screen';
 import { PillButton } from './ui/Button';
-import { DifficultyBar, SegmentedControl, TextField } from './ui/Controls';
+import { DifficultyBar, DifficultySign, SegmentedControl, TextField } from './ui/Controls';
 import { Cell, Section } from './ui/List';
 import { FormError } from './ui/States';
 import { Icon } from './ui/Icon';
@@ -13,6 +13,7 @@ import { Txt } from './ui/Text';
 import { useI18n } from '../lib/i18n';
 import { useTheme } from '../lib/themeContext';
 import { errorMessage } from '../lib/errors';
+import { selectionFeedback } from '../lib/haptics';
 import { between, normalizeTag } from '../lib/validation';
 import type { Spot, SpotInput, SpotType } from '../lib/types';
 
@@ -169,7 +170,8 @@ export function SpotForm({ initial, title, submitLabel, onSubmit }: {
                 checked={level === n}
                 accessibilityRole="radio"
                 accessibilityLabel={`${n} — ${d.levels.names[n - 1]}: ${d.levels.explain[n - 1]}`}
-                onPress={() => setLevel(n)}
+                left={<DifficultySign level={n} variant="number" />}
+                onPress={() => { if (level !== n) selectionFeedback(); setLevel(n); }}
               />
             ))}
           </Section>

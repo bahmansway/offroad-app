@@ -43,7 +43,7 @@ export default function GarageScreen() {
     >
       {offline && !user ? <ErrorState message={t('errors.offline')} /> : user ? (
         mine === null && !error ? <LoadingState inline /> : mine?.length === 0 ? (
-          <EmptyState icon="garage" title={t('garage.noCars')} actionLabel={t('garage.addCar')} onAction={add} />
+          <EmptyState illustration="car" title={t('car.garageEmptyTitle')} text={t('car.garageEmptyText')} actionLabel={t('garage.addCar')} onAction={add} />
         ) : mine ? (
           <Section header={t('garage.myCars')}>
             {mine.map((c) => (
@@ -62,7 +62,7 @@ export default function GarageScreen() {
           {latest.map((c) => <CarCell key={c.id} car={c} showOwner onPress={() => router.push(`/car/${c.id}`)} />)}
         </Section>
       ) : latest?.length === 0 ? (
-        <Section header={t('garage.community')}><EmptyState icon="garage" title={t('garage.noCommunity')} /></Section>
+        <Section header={t('garage.community')}><EmptyState icon="garage" title={t('garage.noCommunity')} contour={false} /></Section>
       ) : null}
     </LargeTitleScreen>
   );

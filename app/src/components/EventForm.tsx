@@ -17,7 +17,7 @@ import { api } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { useTheme } from '../lib/themeContext';
 import { TAP } from '../lib/theme';
-import { tapFeedback } from '../lib/haptics';
+import { selectionFeedback } from '../lib/haptics';
 import { eventErrorMessage } from '../lib/errors';
 import {
   addRequirement, EVENT_LIMITS, REQUIREMENT_SUGGESTIONS, toggleRequirement, validateEventForm, type EventFormState,
@@ -318,7 +318,7 @@ function Chip({ label, on, onPress, disabled, radio }: { label: string; on: bool
       accessibilityState={radio ? { checked: on, disabled: !!disabled } : { checked: on, disabled: !!disabled }}
       accessibilityLabel={label}
       disabled={disabled}
-      onPress={() => { tapFeedback(); onPress(); }}
+      onPress={() => { selectionFeedback(); onPress(); }}
       style={({ pressed }) => [
         { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: TAP, paddingHorizontal: 14, borderRadius: TAP / 2, backgroundColor: on ? c.tint : c.card },
         disabled && { opacity: 0.4 },

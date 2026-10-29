@@ -9,7 +9,7 @@ import { useI18n } from '../../lib/i18n';
 import { useAsync } from '../../lib/useAsync';
 import { errorMessage } from '../../lib/errors';
 import { sameId } from '../../lib/format';
-import { tapFeedback } from '../../lib/haptics';
+import { selectionFeedback } from '../../lib/haptics';
 import type { Id } from '../../lib/types';
 
 /** Picks which of my cars is "current" (shown on my profile and later in chats). */
@@ -27,7 +27,7 @@ function Picker() {
 
   async function choose(id: Id | null) {
     if (busy) return;
-    tapFeedback();
+    selectionFeedback();
     setBusy(true);
     setFormError(null);
     try {
@@ -54,7 +54,7 @@ function Picker() {
               key={c.id}
               title={carTitle(c)}
               subtitle={[String(c.year), c.engine].filter(Boolean).join(' · ')}
-              left={<Thumb seed={c.id} uri={photoUri(c.photoUrl)} />}
+              left={<Thumb kind="car" uri={photoUri(c.photoUrl)} />}
               checked={sameId(currentId, c.id)}
               accessibilityRole="radio"
               onPress={() => choose(c.id)}

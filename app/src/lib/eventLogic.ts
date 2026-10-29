@@ -180,6 +180,21 @@ export function deviceOnBakuTime(zone?: string | null, offsetMin?: number): bool
   return (offsetMin ?? new Date().getTimezoneOffset()) === -240;
 }
 
+/** Starts within the next `days` days (or has already started but is not over). Used for the tint month strip. */
+export function isSoon(iso: string, now: Date = new Date(), days = 7): boolean {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return false;
+  return t - now.getTime() < days * 24 * 60 * 60 * 1000;
+}
+
+/** Events list sections: "This week" (starts within 7 days) and "Later". Order is kept. */
+export function groupByWeek<T extends { startsAt: string }>(items: T[], now: Date = new Date()): { thisWeek: T[]; later: T[] } {
+  const thisWeek: T[] = [];
+  const later: T[] = [];
+  for (const e of items) (isSoon(e.startsAt, now) ? thisWeek : later).push(e);
+  return { thisWeek, later };
+}
+
 /** Date block on cards: "02" + "NOV" (month short name from the dictionary), Baku date. */
 export function dateBlock(iso: string, monthsShort: string[]): { day: string; month: string } {
   const d = new Date(iso);

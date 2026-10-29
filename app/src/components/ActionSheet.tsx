@@ -5,6 +5,7 @@ import { useTheme } from '../lib/themeContext';
 import { useI18n } from '../lib/i18n';
 import { HAIRLINE, radius, TAP } from '../lib/theme';
 import { Txt } from './ui/Text';
+import { IconButton } from './ui/Button';
 
 export interface SheetAction {
   label: string;
@@ -75,5 +76,19 @@ export function ActionSheet({ visible, title, actions, onClose }: {
         </View>
       </View>
     </Modal>
+  );
+}
+
+/** "···" button that opens an ActionSheet (hero menus: Report, Delete …). Destructive actions should
+ *  still ask with `confirmAsync` before they run. Renders nothing when there are no actions. */
+export function MoreMenu({ actions, title, label, glass = true }: { actions: SheetAction[]; title?: string; label?: string; glass?: boolean }) {
+  const { t } = useI18n();
+  const [open, setOpen] = React.useState(false);
+  if (!actions.length) return null;
+  return (
+    <>
+      <IconButton icon="more" glass={glass} label={label ?? t('common.more')} onPress={() => setOpen(true)} />
+      <ActionSheet visible={open} title={title} actions={actions} onClose={() => setOpen(false)} />
+    </>
   );
 }

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 import {
   BAKU_CENTER, DEFAULT_ZOOM, MAPLIBRE_CDN_VERSION, MAPLIBRE_SRI, mapStyleUrl, pinCss,
   buildPins, isAllowedExternalLink, parseMapMessage, type MapProps,
 } from './shared';
-import { palettes, type, type Scheme } from '../../lib/theme';
+import { palettes, type Scheme } from '../../lib/theme';
+import { MapErrorCard } from '../ui/States';
 import { useTheme } from '../../lib/themeContext';
 
 type WebViewHandle = { injectJavaScript: (js: string) => void };
@@ -34,6 +35,8 @@ function buildHtml(center: [number, number], zoom: number, scheme: Scheme): stri
   var markers=[];
   map.on('click',function(e){ var p=e.lngLat.wrap(); send({type:'mapPress',lat:p.lat,lng:p.lng}); });
   map.on('load',function(){ send({type:'loaded'}); });
+  // A style/tile network failure before the first load counts as "map failed" (same rule as the web map).
+  map.on('error',function(e){ if(!map.isStyleLoaded() && e && e.error){ send({type:'failed'}); } });
   // Attribution links open in the phone browser, not inside the map view.
   document.addEventListener('click',function(e){
     var a=e.target && e.target.closest ? e.target.closest('a[href]') : null;
@@ -43,10 +46,10 @@ function buildHtml(center: [number, number], zoom: number, scheme: Scheme): stri
     markers.forEach(function(m){m.remove();}); markers=[];
     pins.forEach(function(p){
       var el=document.createElement('button'); el.type='button';
-      el.className=p.kind==='picked'?'or-pin or-pin--picked':'or-pin';
+      el.className=p.kind==='picked'?'or-pin or-pin--picked':(p.className==='or-pin or-pin--camp'?'or-pin or-pin--camp':'or-pin');
       el.setAttribute('aria-label',p.label); el.innerHTML=p.html;
       if(p.kind!=='picked'){ el.addEventListener('click',function(ev){ ev.stopPropagation(); send({type:'spotPress',id:p.id}); }); }
-      markers.push(new maplibregl.Marker({element:el,anchor:'bottom-left'}).setLngLat([p.lng,p.lat]).addTo(map));
+      markers.push(new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([p.lng,p.lat]).addTo(map));
     });
   };
   // z === null keeps the current zoom (so placing a pin doesn't zoom the map out).
@@ -67,6 +70,8 @@ export default function SpotMap(props: MapProps) {
   const web = useRef<WebViewHandle>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** bumping this remounts the WebView ("Try again" on the error card) */
+  const [attempt, setAttempt] = useState(0);
   const cb = useRef(props);
   cb.current = props;
   const centerReqs = useRef(new Map<number, (c: { lat: number; lng: number } | null) => void>());
@@ -89,11 +94,11 @@ export default function SpotMap(props: MapProps) {
       }),
   }), [ready]);
 
-  // HTML is built once; later changes are pushed with injectJavaScript.
+  // HTML is built once (again after "Try again"); later changes are pushed with injectJavaScript.
   const html = useMemo(
     () => buildHtml(props.center ? [props.center.lng, props.center.lat] : BAKU_CENTER, props.zoom ?? DEFAULT_ZOOM, scheme),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [attempt],
   );
 
   const pins = useMemo(() => buildPins(props, props.label), [props.spots, props.picked?.lat, props.picked?.lng, props.pinLabel]);
@@ -142,6 +147,7 @@ export default function SpotMap(props: MapProps) {
   return (
     <View style={[styles.wrap, { backgroundColor: pal.mapBg }]} accessibilityLabel={props.label}>
       <WebView
+        key={attempt}
         ref={web}
         source={{ html, baseUrl: PAGE_ORIGIN + '/' }}
         // '*' so EVERY navigation reaches onShouldStartLoadWithRequest below. With a narrower list,
@@ -165,10 +171,15 @@ export default function SpotMap(props: MapProps) {
           return false;
         }}
       />
-      {failed && props.failedText ? (
-        <View style={styles.failed} pointerEvents="none">
-          <Text style={[styles.failedText, { color: pal.label }]}>{props.failedText}</Text>
-        </View>
+      {failed ? (
+        <MapErrorCard
+          style={[StyleSheet.absoluteFill, props.errorInsets ? {
+            paddingTop: props.errorInsets.top, paddingBottom: props.errorInsets.bottom,
+            paddingLeft: props.errorInsets.left, paddingRight: props.errorInsets.right,
+          } : null]}
+          compact={props.errorCompact}
+          onRetry={props.errorCompact ? undefined : () => { setFailed(false); setReady(false); shownScheme.current = scheme; setAttempt((a) => a + 1); }}
+        />
       ) : null}
     </View>
   );
@@ -177,6 +188,4 @@ export default function SpotMap(props: MapProps) {
 const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: 'hidden' },
   web: { flex: 1 },
-  failed: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  failedText: { ...type.subhead, textAlign: 'center' },
 });

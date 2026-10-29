@@ -16,13 +16,13 @@ import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { clanErrorMessage, clanShouldReload, errorMessage } from '../../lib/errors';
 import { confirmAsync } from '../../lib/dialogs';
-import { formatDate, sameId } from '../../lib/format';
+import { formatDate, formatShortDate, sameId } from '../../lib/format';
 import { successFeedback } from '../../lib/haptics';
 import type { Clan, ClanInvite, ClanMember, ClanRequest, EventSummary } from '../../lib/types';
 
 export default function ClanScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t } = useI18n();
+  const { t, d, lang } = useI18n();
   const { c } = useTheme();
   const { user } = useAuth();
   const chat = useChat();
@@ -227,7 +227,7 @@ export default function ClanScreen() {
             <Cell
               key={r.user.id}
               title={r.user.displayName}
-              subtitle={formatDate(r.createdAt)}
+              subtitle={formatShortDate(r.createdAt, { today: t('common.today'), yesterday: t('common.yesterday'), monthsShort: d.events.monthsShort }, lang)}
               left={<Avatar uri={photoUri(r.user.avatarUrl)} name={r.user.displayName} size={40} />}
               chevron={false}
               accessibilityLabel={r.user.displayName}

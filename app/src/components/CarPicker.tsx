@@ -42,7 +42,7 @@ export function CarAndSeats({ cars, carId, onCar, seats, onSeats, header, footer
             key={car.id}
             title={carTitle(car)}
             subtitle={String(car.year)}
-            left={<Thumb seed={car.id} uri={photoUri(car.photoUrl)} size={40} />}
+            left={<Thumb kind="car" uri={photoUri(car.photoUrl)} size={40} />}
             checked={sameId(car.id, carId)}
             accessibilityRole="radio"
             onPress={() => onCar(car.id)}

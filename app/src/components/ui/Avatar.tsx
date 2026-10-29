@@ -1,7 +1,8 @@
 import React from 'react';
 import { Image, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useTheme } from '../../lib/themeContext';
-import { radius, tints } from '../../lib/theme';
+import { radius, terrain, thumbTone, type ThumbKind } from '../../lib/theme';
+import { CarSilhouette, Contour } from './Motifs';
 import { initials } from '../../lib/format';
 import { Icon, type IconName } from './Icon';
 import { Txt } from './Text';
@@ -24,18 +25,31 @@ export function Avatar({ uri, name, size = 44, style }: { uri?: string | null; n
   );
 }
 
-/** Rounded photo or colour tile with a placeholder icon (cars, spots). */
-export function Thumb({ uri, seed, icon = 'car', size = 46, rounded = radius.thumb, style }: {
-  uri?: string | null; seed: string | number; icon?: IconName; size?: number | '100%'; rounded?: number; style?: StyleProp<ViewStyle>;
+const KIND_ICON: Record<ThumbKind, IconName> = { trail: 'trail', camp: 'tent', car: 'car', event: 'events', clan: 'people', mod: 'wrench' };
+
+/**
+ * Rounded photo, or a terrain tile when there is no photo. The colour comes from the TYPE, never the id
+ * (trail = clay + trail glyph, camp = forest + tent, car = stone + 4x4 silhouette, event = sand, clan/mod = stone),
+ * with a faint contour texture. `seed` is no longer used (kept so old calls still compile).
+ */
+export function Thumb({ uri, kind = 'car', icon, size = 46, rounded = radius.thumb, style }: {
+  uri?: string | null; kind?: ThumbKind; seed?: string | number; icon?: IconName; size?: number | '100%'; rounded?: number; style?: StyleProp<ViewStyle>;
 }) {
-  const bg = tints[hashSeed(seed) % tints.length];
+  const { c } = useTheme();
+  const bg = terrain(c, thumbTone(kind)).solid;
   const dim = size === '100%' ? { width: '100%' as const, height: '100%' as const } : { width: size, height: size };
+  const px = typeof size === 'number' ? size : 80;
   return (
-    <View style={[dim, { borderRadius: rounded, overflow: 'hidden', backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }, style]} accessible={false}>
+    <View style={[dim, { borderRadius: rounded, overflow: 'hidden', backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }, style]} accessible={false} importantForAccessibility="no-hide-descendants">
       {uri ? (
         <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
       ) : (
-        <Icon name={icon} size={typeof size === 'number' ? Math.round(size * 0.48) : 40} color="rgba(255,255,255,0.9)" />
+        <>
+          <Contour color="#FFFFFF" opacity={0.18} seed={1} width={px} height={px} />
+          {kind === 'car' && !icon
+            ? <CarSilhouette width={Math.round(px * 0.78)} />
+            : <Icon name={icon ?? KIND_ICON[kind]} size={Math.round(px * 0.48)} color="#FFFFFF" strokeWidth={2.2} />}
+        </>
       )}
     </View>
   );

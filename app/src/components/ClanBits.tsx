@@ -1,32 +1,36 @@
 import React from 'react';
 import { Image, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useI18n } from '../lib/i18n';
-import { tints } from '../lib/theme';
+import { useTheme } from '../lib/themeContext';
+import { Contour } from './ui/Motifs';
 import type { Clan } from '../lib/types';
-import { hashSeed } from './ui/Avatar';
 import { Badge } from './ui/Controls';
 import { Cell } from './ui/List';
 import { Txt } from './ui/Text';
 import { photoUri } from './Rows';
 
-/** Clan logo: the photo, or the tag on an earthy colour tile. Rounded square like an app icon. */
+/** Clan logo: the photo, or the tag on the `stone` terrain tile (clans are stone, DESIGN-PASS P2). Rounded square like an app icon. */
 export function ClanLogo({ clan, size = 46, style }: {
   clan: { id: string | number; tag: string; logoUrl?: string | null }; size?: number; style?: StyleProp<ViewStyle>;
 }) {
+  const { c } = useTheme();
   const uri = photoUri(clan.logoUrl);
   const r = Math.round(size * 0.26);
   return (
     <View
-      style={[{ width: size, height: size, borderRadius: r, overflow: 'hidden', backgroundColor: tints[hashSeed(clan.id) % tints.length], alignItems: 'center', justifyContent: 'center' }, style]}
+      style={[{ width: size, height: size, borderRadius: r, overflow: 'hidden', backgroundColor: c.stone, alignItems: 'center', justifyContent: 'center' }, style]}
       accessible={false}
       importantForAccessibility="no-hide-descendants"
     >
       {uri ? (
         <Image source={{ uri }} style={{ width: size, height: size }} resizeMode="cover" />
       ) : (
+        <>
+        <Contour color="#FFFFFF" opacity={0.18} seed={5} width={size} height={size} />
         <Txt color="#FFFFFF" numberOfLines={1} style={{ fontWeight: '700', fontSize: Math.round(size * (clan.tag.length > 3 ? 0.26 : 0.34)), letterSpacing: 0.5 }}>
           {clan.tag}
         </Txt>
+        </>
       )}
     </View>
   );
