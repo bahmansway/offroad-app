@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "Offroad",
+    "name": "YOLCHU",
     "slug": "offroad-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/brand/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
@@ -14,20 +14,19 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#C2410C",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/brand/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./assets/brand/favicon.png",
       "output": "single",
       "bundler": "metro",
-      "name": "Offroad",
+      "name": "YOLCHU",
       "themeColor": "#F2F2F7",
-      "backgroundColor": "#F2F2F7"
+      "backgroundColor": "#F2F2F7",
+      "shortName": "YOLCHU"
     },
     "plugins": [
       "expo-router",
@@ -39,6 +38,16 @@
         {
           "photosPermission": "Choose a photo for your profile or your car.",
           "cameraPermission": false
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/brand/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
         }
       ]
     ],

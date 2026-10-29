@@ -1,3 +1,4 @@
+import { Wordmark } from './Brand';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
@@ -50,7 +51,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   return (
     <NavScreen>
       <View style={{ gap: 6, paddingHorizontal: 4 }}>
-        <Txt variant="footnote" tone="tint" style={{ fontWeight: '700', letterSpacing: 2 }}>{t('appName')}</Txt>
+        <Wordmark height={26} style={{ marginBottom: 6 }} />
         <Txt variant="largeTitle" accessibilityRole="header">{isLogin ? t('auth.loginTitle') : t('auth.registerTitle')}</Txt>
         <Txt variant="subhead" tone="label2">{t('auth.tagline')}</Txt>
       </View>

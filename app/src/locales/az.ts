@@ -1,7 +1,7 @@
 import type { Dict } from './en';
 
 const az: Dict = {
-  appName: 'OFFROAD',
+  appName: 'YOLCHU',
   common: {
     clear: 'Təmizlə',
     done: 'Hazır',
@@ -279,7 +279,7 @@ const az: Dict = {
     appearanceDark: 'Tünd',
     about: 'Haqqında və lisenziyalar',
     aboutTitle: 'Haqqında və lisenziyalar',
-    aboutText: 'Offroad Azərbaycandakı bütün offroad sürücülərini bir yerə toplayır. Xəritə © OpenStreetMap iştirakçıları, xəritə plitələri OpenFreeMap.',
+    aboutText: 'YOLCHU ("yolçu" — yolda olan) Azərbaycandakı bütün offroad sürücülərini bir yerə toplayır. Xəritə © OpenStreetMap iştirakçıları, xəritə plitələri OpenFreeMap.',
     licencesHeader: 'Açıq mənbə lisenziyaları',
     carListLicence: 'Maşın marka və model siyahısı',
     carListSource: 'global-car-models, Global Car Models, MIT lisenziyası',

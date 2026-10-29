@@ -1,6 +1,7 @@
 import React from 'react';
 import { Linking, Platform, View } from 'react-native';
 import { Cell, IconTile, Section, SheetScreen, Txt, goBack, useTheme } from '../components/ui';
+import { Wordmark } from '../components/Brand';
 import { useI18n } from '../lib/i18n';
 import { CAR_LIST_SOURCE_URL, MIT_GLOBAL_CAR_MODELS } from '../lib/licences';
 import type { AppearancePref } from '../lib/theme';
@@ -24,7 +25,7 @@ export default function AboutScreen() {
 
       <Section>
         <View style={{ padding: 16, gap: 8 }}>
-          <Txt variant="headline">OFFROAD</Txt>
+          <Wordmark height={30} />
           <Txt variant="subhead" tone="label2">{t('profile.aboutText')}</Txt>
         </View>
       </Section>

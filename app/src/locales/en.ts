@@ -1,5 +1,5 @@
 const en = {
-  appName: 'OFFROAD',
+  appName: 'YOLCHU',
   common: {
     clear: 'Clear',
     done: 'Done',
@@ -277,7 +277,7 @@ const en = {
     appearanceDark: 'Dark',
     about: 'About & licences',
     aboutTitle: 'About & licences',
-    aboutText: 'Offroad brings all offroad drivers in Azerbaijan into one place. Maps © OpenStreetMap contributors, tiles by OpenFreeMap.',
+    aboutText: 'YOLCHU (Azerbaijani for "the one on the way") brings all offroad drivers in Azerbaijan into one place. Maps © OpenStreetMap contributors, tiles by OpenFreeMap.',
     licencesHeader: 'Open-source licences',
     carListLicence: 'Car brand and model list',
     carListSource: 'global-car-models by Global Car Models, MIT licence',
