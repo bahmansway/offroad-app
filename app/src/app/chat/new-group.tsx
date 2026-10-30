@@ -36,10 +36,12 @@ function NewGroup() {
     if (nameErr) return;
     if (!picked.length) return setError(t('group.pickAtLeastOne'));
     setBusy(true);
+    const my = chat.session();
     try {
       const conv = await api.createGroup(name.trim(), picked);
+      if (my !== chat.session()) return; // logged out / another account meanwhile
       successFeedback();
-      chat.upsert(conv);
+      chat.upsert(conv, my);
       router.replace(`/chat/${conv.id}`);
     } catch (e) {
       setError(groupErrorMessage(e, t, (x) => errorMessage(x, t, 'create')));

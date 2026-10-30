@@ -6,7 +6,7 @@ import {
   createStaleGuard, hasResults, localConversationMatches, mergeSearch, searchQuery,
 } from '../searchLogic';
 import {
-  addableFriends, canEditGroup, canRemoveGroupMember, groupErrorMessage, groupMemberActions, groupNameError, GROUP_MAX_PICK,
+  addableFriends, canEditGroup, isGroup, canRemoveGroupMember, groupErrorMessage, groupMemberActions, groupNameError, GROUP_MAX_PICK,
   nextAdmin, remainingSlots, togglePick,
 } from '../groupLogic';
 import {
@@ -124,6 +124,22 @@ describe('search', () => {
     await Promise.all([run('Ra', 30), run('Rau', 5)]);
     expect(shown).toBe('Rau');
   });
+  it('stale guard is scoped to the user: a search started before logout / account switch never lands', async () => {
+    const g = createStaleGuard('userA');
+    let shown: string | null = null;
+    const ticket = g.next(); // A searches "Rau"
+    const askedFor = g.scope;
+    expect(g.setScope('userA')).toBe(false); // same user: nothing dropped
+    expect(g.isLatest(ticket)).toBe(true);
+    expect(g.setScope(null)).toBe(true); // A logs out
+    expect(g.setScope('userB')).toBe(true); // B logs in
+    await new Promise((r) => setTimeout(r, 5));
+    if (g.isLatest(ticket) && g.scope === askedFor) shown = 'A results';
+    expect(shown).toBeNull();
+    expect(g.scope).toBe('userB');
+    const t2 = g.next();
+    expect(g.isLatest(t2) && g.scope === 'userB').toBe(true);
+  });
   it('matches my loaded chats locally (title or other member, ı/i-insensitive)', () => {
     const list = [conv('1', 'İlqar'), conv('2', 'Quba trip', { type: 'group' }), conv('3', 'X', { otherUser: ref('9', 'Ilham') })];
     expect(localConversationMatches(list, 'il').map((c) => c.id)).toEqual(['1', '3']);
@@ -151,6 +167,10 @@ describe('group permissions', () => {
     expect(canEditGroup(group)).toBe(true);
     expect(canEditGroup(notAdmin)).toBe(false);
     expect(canEditGroup(conv('d', 'D', { isAdmin: true }))).toBe(false); // a DM is never a group
+    // the group info page sends any other chat type back to the chat
+    expect(isGroup(group)).toBe(true);
+    expect(isGroup(conv('d', 'D'))).toBe(false);
+    expect(isGroup(conv('c', 'C', { type: 'clan' }))).toBe(false);
     expect(canRemoveGroupMember(group, 'u2', 'u1')).toBe(true);
     expect(canRemoveGroupMember(group, 'u1', 'u1')).toBe(false);
     expect(canRemoveGroupMember(notAdmin, 'u2', 'u1')).toBe(false);
@@ -295,6 +315,9 @@ describe('design-pass review fixes', () => {
     expect(pinCss('dark')).toContain('.or-pin--picked .or-glyph{color:#1A0A00}');
     expect(pinCss('light')).toContain('.or-pin--picked .or-glyph{color:#FFFFFF}');
     expect(pinCss('light')).toMatch(/prefers-reduced-motion: reduce\)\{\.or-pin--picked\{animation:none\}/);
+    // phone Reduce Motion (passed in by the native map): no pop animation at all
+    expect(pinCss('light')).toContain('.or-pin--picked{animation:or-pop');
+    expect(pinCss('dark', true)).not.toContain('animation:or-pop');
   });
   it('"Bu həftə" is the Baku calendar week (Mon–Sun)', () => {
     expect(tAz('events.thisWeek')).toBe('Bu həftə');

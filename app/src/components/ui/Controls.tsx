@@ -88,9 +88,11 @@ export function ChoicePills<T extends string | number>({ options, value, onChang
 }
 
 /** Rounded search field (fill background). `glass` = floating over the map. */
-export function SearchField({ value, onChangeText, placeholder, label, glass, style, autoFocus }: {
+export function SearchField({ value, onChangeText, placeholder, label, glass, style, autoFocus, accessory }: {
   value: string; onChangeText: (s: string) => void; placeholder: string; label: string;
   glass?: boolean; style?: StyleProp<ViewStyle>; autoFocus?: boolean;
+  /** small element at the right end, after the clear button (e.g. Explore's "search people" button) */
+  accessory?: React.ReactNode;
 }) {
   const { c } = useTheme();
   const { t } = useI18n();
@@ -108,7 +110,7 @@ export function SearchField({ value, onChangeText, placeholder, label, glass, st
         autoCorrect={false}
         autoFocus={autoFocus}
         maxLength={80}
-        style={[type.body, { flex: 1, color: c.label, alignSelf: 'stretch', outlineWidth: 0 } as object]}
+        style={[type.body, { flex: 1, minWidth: 0, color: c.label, alignSelf: 'stretch', outlineWidth: 0 } as object]}
       />
       {value ? (
         <Pressable accessibilityRole="button" accessibilityLabel={t('common.clear')} onPress={() => onChangeText('')} hitSlop={10}>
@@ -117,6 +119,7 @@ export function SearchField({ value, onChangeText, placeholder, label, glass, st
           </View>
         </Pressable>
       ) : null}
+      {accessory}
     </View>
   );
   if (glass) return <GlassView elevated style={[{ borderRadius: h / 2 }, style]}>{inner}</GlassView>;

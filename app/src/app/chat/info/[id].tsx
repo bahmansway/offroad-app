@@ -18,7 +18,7 @@ import { sameId } from '../../../lib/format';
 import { successFeedback } from '../../../lib/haptics';
 import { pickPhoto } from '../../../lib/photos';
 import {
-  canEditGroup, GROUP_NAME_MAX, groupErrorMessage, groupMemberActions, groupNameError, nextAdmin, remainingSlots,
+  canEditGroup, GROUP_NAME_MAX, isGroup, groupErrorMessage, groupMemberActions, groupNameError, nextAdmin, remainingSlots,
 } from '../../../lib/groupLogic';
 import type { Conversation, ConversationMember } from '../../../lib/types';
 
@@ -53,6 +53,11 @@ function GroupInfo() {
     try {
       const [cv, m] = await Promise.all([api.conversation(id), api.conversationMembers(id)]);
       if (my !== seq.current) return;
+      // only groups have an info page; a DM / clan / event chat goes back to the chat itself
+      if (!isGroup(cv)) {
+        router.replace(`/chat/${id}`);
+        return;
+      }
       setConv(cv);
       setMembers(m.items);
       if (!editingRef.current) setName(cv.title);

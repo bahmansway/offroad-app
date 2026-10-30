@@ -61,8 +61,11 @@ interface ChatValue {
   friendRequests: number;
   /** v4: Söhbət tab badge = unread messages + clan invites */
   chatBadge: number;
-  /** v4: put a conversation into the list (new DM / group) */
-  upsert: (c: Conversation) => void;
+  /** v4: put a conversation into the list (new DM / group). Pass the `session()` taken before the
+   *  request: if the user logged out / switched meanwhile, nothing is added. */
+  upsert: (c: Conversation, fromSession?: number) => void;
+  /** v4: current login session number (changes on login / logout) */
+  session: () => number;
   /** v4: drop a conversation from the list (left / removed from a group) */
   drop: (id: Id) => void;
 }
@@ -302,12 +305,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     api.markRead(id).then(() => refreshUnreadRef.current()).catch(() => { /* next load fixes the count */ });
   }, [setList, setServerUnread]);
 
-  const upsert = useCallback((conv: Conversation) => {
+  const upsert = useCallback((conv: Conversation, fromSession?: number) => {
+    if (fromSession !== undefined && fromSession !== session.current) return;
     const l = listRef.current;
     if (!l) return;
     const rest = l.filter((c) => String(c.id) !== String(conv.id));
     setList(sortConversations([conv, ...rest]));
   }, [setList]);
+
+  const currentSession = useCallback(() => session.current, []);
 
   const drop = useCallback((id: Id) => {
     const l = listRef.current;
@@ -375,8 +381,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     () => ({
       conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm,
       on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop,
+      session: currentSession,
     }),
-    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm, on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop],
+    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm, on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop, currentSession],
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

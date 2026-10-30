@@ -858,6 +858,7 @@ const en = {
     },
   },
   search: {
+    peopleShort: 'People',
     title: 'Search',
     placeholder: 'People, clans, chats',
     label: 'Search people, clans and chats',

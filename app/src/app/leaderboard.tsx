@@ -203,7 +203,7 @@ function BoardRow({ item, mine, last }: { item: LeaderboardItem; mine: boolean; 
       chevron={false}
       onPress={openable(item)}
       minHeight={60}
-      accessibilityRole="link"
+      accessibilityRole={item.blocked ? undefined : 'link'}
       accessibilityLabel={itemLabel(item, t, lang, mine)}
       last={last}
     />

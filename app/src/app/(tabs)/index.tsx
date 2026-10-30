@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SpotMap from '../../components/map/Map';
 import { SpotCell } from '../../components/Rows';
 import {
-  EmptyState, ErrorState, GlassView, IconButton, LinkButton, LoadingState, PillButton, SearchField, Section,
+  EmptyState, ErrorState, GlassView, Icon, IconButton, LinkButton, LoadingState, PillButton, SearchField, Section,
   SegmentedControl, Txt, useTabBarSpace,
 } from '../../components/ui';
 import { api } from '../../lib/api';
@@ -27,6 +27,7 @@ export default function ExploreScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
+  const { width } = useWindowDimensions();
   const [spots, setSpots] = useState<Spot[]>([]);
   const [loaded, setLoaded] = useState(false);
   const seq = useRef(0);
@@ -93,12 +94,31 @@ export default function ExploreScreen() {
       {/* floating controls */}
       <View pointerEvents="box-none" style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 12, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <SearchField glass value={query} onChangeText={setQuery} placeholder={t('explore.search')} label={t('explore.searchLabel')} style={{ flex: 1 }} />
+          <SearchField
+            glass
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t('explore.search')}
+            label={t('explore.searchLabel')}
+            style={{ flex: 1, minWidth: 0 }}
+            accessory={
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('search.openExplore')}
+                onPress={() => router.push(query.trim() ? { pathname: '/search', params: { q: query.trim() } } : '/search')}
+                hitSlop={6}
+                style={({ pressed }) => [{ height: 36, minWidth: 36, borderRadius: 18, paddingHorizontal: width > 360 ? 10 : 0, justifyContent: 'center', marginRight: -8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.tintSoft }, pressed && { opacity: 0.6 }]}
+              >
+                <Icon name="people" size={16} color={c.tintSoftText} strokeWidth={2.4} />
+                {/* narrow phones (≤ 360 pt): icon only, so the spot search keeps room for its placeholder */}
+                {width > 360 ? <Txt variant="footnote" color={c.tintSoftText} style={{ fontWeight: '700' }} numberOfLines={1}>{t('search.peopleShort')}</Txt> : null}
+              </Pressable>
+            }
+          />
           <View>
             <IconButton icon="filter" label={t('explore.filters')} glass size={50} onPress={() => setLevelOpen((o) => !o)} color={levelActive ? c.tint : c.label} />
             {levelActive ? <View style={{ position: 'absolute', top: 4, right: 4, width: 10, height: 10, borderRadius: 5, backgroundColor: c.tint }} /> : null}
           </View>
-          <IconButton icon="people" label={t('search.openExplore')} glass size={50} onPress={() => router.push('/search')} color={c.label} />
           <IconButton icon="trophy" label={t('board.open')} glass size={50} onPress={() => router.push('/leaderboard')} color={c.tint} />
         </View>
         <SegmentedControl<TypeFilter>

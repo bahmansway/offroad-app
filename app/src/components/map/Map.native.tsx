@@ -7,6 +7,7 @@ import {
 } from './shared';
 import { palettes, type Scheme } from '../../lib/theme';
 import { MapErrorCard } from '../ui/States';
+import { useReduceMotion } from '../ui/Motifs';
 import { useTheme } from '../../lib/themeContext';
 
 type WebViewHandle = { injectJavaScript: (js: string) => void };
@@ -16,13 +17,13 @@ const WebView = RNWebView as unknown as React.ComponentType<WebViewProps & { ref
 /** The page is loaded with this base URL so it has a stable, known origin. */
 const PAGE_ORIGIN = 'https://offroad-map.local';
 
-function buildHtml(center: [number, number], zoom: number, scheme: Scheme): string {
+function buildHtml(center: [number, number], zoom: number, scheme: Scheme, reduceMotion: boolean): string {
   const v = MAPLIBRE_CDN_VERSION;
   const pal = palettes[scheme];
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link href="https://unpkg.com/maplibre-gl@${v}/dist/maplibre-gl.css" rel="stylesheet" integrity="${MAPLIBRE_SRI.css}" crossorigin="anonymous">
-<style>html,body,#map{margin:0;height:100%;width:100%;background:${pal.mapBg}}</style><style id="pins">${pinCss(scheme)}</style>
+<style>html,body,#map{margin:0;height:100%;width:100%;background:${pal.mapBg}}</style><style id="pins">${pinCss(scheme, reduceMotion)}</style>
 </head><body><div id="map"></div>
 <script src="https://unpkg.com/maplibre-gl@${v}/dist/maplibre-gl.js" integrity="${MAPLIBRE_SRI.js}" crossorigin="anonymous"></script>
 <script>
@@ -82,6 +83,8 @@ export default function SpotMap(props: MapProps) {
   const scheme = props.scheme ?? themeScheme;
   const pal = palettes[scheme];
   const shownScheme = useRef(scheme);
+  const reduceMotion = useReduceMotion();
+  const shownMotion = useRef(reduceMotion);
 
   useImperativeHandle(props.ref, () => ({
     getCenter: () =>
@@ -98,7 +101,7 @@ export default function SpotMap(props: MapProps) {
 
   // HTML is built once (again after "Try again"); later changes are pushed with injectJavaScript.
   const html = useMemo(
-    () => buildHtml(props.center ? [props.center.lng, props.center.lat] : BAKU_CENTER, props.zoom ?? DEFAULT_ZOOM, scheme),
+    () => buildHtml(props.center ? [props.center.lng, props.center.lat] : BAKU_CENTER, props.zoom ?? DEFAULT_ZOOM, scheme, reduceMotion),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [attempt],
   );
@@ -113,9 +116,14 @@ export default function SpotMap(props: MapProps) {
   useEffect(() => {
     if (ready && shownScheme.current !== scheme) {
       shownScheme.current = scheme;
-      web.current?.injectJavaScript(`window.__setScheme(${JSON.stringify(mapStyleUrl(scheme))},${JSON.stringify(pinCss(scheme))});true;`);
+      shownMotion.current = reduceMotion;
+      web.current?.injectJavaScript(`window.__setScheme(${JSON.stringify(mapStyleUrl(scheme))},${JSON.stringify(pinCss(scheme, reduceMotion))});true;`);
+    } else if (ready && shownMotion.current !== reduceMotion) {
+      // Reduce Motion changed (or its first answer arrived): swap only the pin CSS
+      shownMotion.current = reduceMotion;
+      web.current?.injectJavaScript(`(function(){var el=document.getElementById('pins'); if(el) el.textContent=${JSON.stringify(pinCss(scheme, reduceMotion))};})();true;`);
     }
-  }, [ready, scheme]);
+  }, [ready, scheme, reduceMotion]);
 
   useEffect(() => {
     if (ready && props.center) {

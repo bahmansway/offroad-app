@@ -16,9 +16,12 @@ export function searchQuery(raw: string): string | null {
 /**
  * Stale-response guard: every request takes a ticket; only the newest ticket may write results.
  * Typing "Ra" → "Rau" fires two requests; if "Ra" answers last it is ignored.
+ * `setScope(userId)`: when the logged-in user changes (logout / another account), every request in
+ * flight is dropped, so one person's results never land on the next person's screen.
  */
-export function createStaleGuard() {
+export function createStaleGuard(initialScope: string | null = null) {
   let latest = 0;
+  let scope = initialScope;
   return {
     next(): number {
       latest += 1;
@@ -30,6 +33,16 @@ export function createStaleGuard() {
     /** drop everything in flight (query cleared, screen left) */
     cancel(): void {
       latest += 1;
+    },
+    /** returns true (and drops everything in flight) when the scope really changed */
+    setScope(next: string | null): boolean {
+      if (next === scope) return false;
+      scope = next;
+      latest += 1;
+      return true;
+    },
+    get scope(): string | null {
+      return scope;
     },
   };
 }

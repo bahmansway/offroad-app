@@ -860,6 +860,7 @@ const az: Dict = {
     },
   },
   search: {
+    peopleShort: 'Adamlar',
     title: 'Axtarış',
     placeholder: 'Adamlar, klanlar, söhbətlər',
     label: 'Adamları, klanları və söhbətləri axtar',

@@ -8,6 +8,7 @@ import { PersonCell } from '../../components/ChatRows';
 import { RequireAuth } from '../../components/RequireAuth';
 import { api } from '../../lib/api';
 import { useChat } from '../../lib/chat';
+import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
 import { chatErrorMessage, errorMessage } from '../../lib/errors';
 import { useAsync } from '../../lib/useAsync';
@@ -16,7 +17,8 @@ import type { Id, UserRef } from '../../lib/types';
 
 /** "Yeni söhbət": pick a person (friends, or search anyone) → DM, or "Qrup yarat". */
 export default function NewChatScreen() {
-  return <RequireAuth><NewChat /></RequireAuth>;
+  const { user } = useAuth();
+  return <RequireAuth><NewChat key={user?.id ?? 'anon'} /></RequireAuth>;
 }
 
 function NewChat() {
@@ -24,7 +26,8 @@ function NewChat() {
   const { c } = useTheme();
   const chat = useChat();
   const [query, setQuery] = useState('');
-  const search = useSearch(query, null);
+  const { user } = useAuth();
+  const search = useSearch(query, null, user?.id ?? null);
   const friends = useAsync(() => api.friends(), []);
   const [busy, setBusy] = useState<Id | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +35,11 @@ function NewChat() {
   async function open(u: UserRef) {
     setBusy(u.id);
     setError(null);
+    const my = chat.session();
     try {
       const conv = await api.startDm(u.id);
-      chat.upsert(conv);
+      if (my !== chat.session()) return; // logged out / another account meanwhile
+      chat.upsert(conv, my);
       router.replace(`/chat/${conv.id}`);
     } catch (e) {
       setError(chatErrorMessage(e, t));

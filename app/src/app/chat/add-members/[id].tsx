@@ -34,10 +34,12 @@ function AddMembers() {
     if (!picked.length) return setError(t('group.pickAtLeastOne'));
     setBusy(true);
     setError(null);
+    const my = chat.session();
     try {
       const conv = await api.addGroupMembers(id, picked);
+      if (my !== chat.session()) return; // logged out / another account meanwhile
       successFeedback();
-      chat.upsert(conv);
+      chat.upsert(conv, my);
       close();
     } catch (e) {
       setError(groupErrorMessage(e, t, (x) => errorMessage(x, t)));

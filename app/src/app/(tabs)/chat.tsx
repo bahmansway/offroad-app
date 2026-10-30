@@ -9,14 +9,20 @@ import { useI18n } from '../../lib/i18n';
 import { errorMessage } from '../../lib/errors';
 import { useSearch } from '../../lib/useSearch';
 
-export default function ChatTab() {
+/** Keyed by the user: logging out / switching account starts with a clean search and list. */
+export default function ChatTabScreen() {
+  const { user } = useAuth();
+  return <ChatTab key={user?.id ?? 'anon'} />;
+}
+
+function ChatTab() {
   const { t } = useI18n();
   const { user, offline } = useAuth();
   const { c } = useTheme();
   const { conversations, reload, reloadInvites } = useChat();
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
-  const search = useSearch(query, conversations);
+  const search = useSearch(query, conversations, user?.id ?? null);
   const searching = query.trim().length > 0;
   const searchBox = (
     <SearchField value={query} onChangeText={setQuery} placeholder={t('chat.search')} label={t('chat.searchA11y')} />

@@ -64,7 +64,7 @@ All text must come from `locales/az.ts` + `locales/en.ts`.
 | `LinkButton` | Tint text button (44 tall) |
 | `SegmentedControl` | iOS segmented control (radiogroup). `glass`, `compact`. Options may carry a decorative `icon` + `iconColor` (Explore: trail in clay, tent in forest) |
 | `ChoicePills` | Scrollable or wrapping pill choices (years, categories) |
-| `SearchField` | Rounded search with clear button; `glass` over the map |
+| `SearchField` | Rounded search with clear button; `glass` over the map; `accessory` = small element at the right end (Explore: people search) |
 | `TextField` | Labelled input in a card; `error`, `hint`, `suffix`, `multiline`, `right` |
 | `DifficultySign` | **Trail-sign difficulty badge** — use it wherever a level is shown (rows, cards, pages). Plate (radius 8) with a number square + the word; darker plate = harder. `size` `small` 28 (rows) / `large` 36 (detail pages). `short` = short words in tight rows (screen reader still hears the full name). `variant="number"` = just the number plate (pickers, detail rows). Never colour-only |
 | `DifficultyBar` | 5 segments (8px, gap 6), filled = tint. Keep it on the spot page, under the large sign (`compact`) |

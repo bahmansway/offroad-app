@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
@@ -27,6 +27,14 @@ export default function ProfileScreen() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [myBoard, setMyBoard] = useState<Leaderboard['me'] | undefined>(undefined);
+  const boardSeq = useRef(0);
+  const boardUser = useRef<string | null>(user?.id ?? null);
+  // another account (or logged out): forget the old rank at once and drop answers in flight
+  useEffect(() => {
+    boardUser.current = user?.id ?? null;
+    boardSeq.current++;
+    setMyBoard(undefined);
+  }, [user?.id]);
   const { friendRequests, refreshUnread } = useChat();
 
   useFocusEffect(useCallback(() => {
@@ -34,7 +42,14 @@ export default function ProfileScreen() {
     api.cars(user.id).then((r) => setCars(r.items)).catch(() => setCars([]));
     // Current car may have been edited, re-photographed or deleted elsewhere.
     refreshUser().catch(() => {});
-    api.leaderboard('month').then((b) => setMyBoard(b.me)).catch(() => setMyBoard(undefined));
+    // only the newest answer for the user still logged in may show
+    const ticket = ++boardSeq.current;
+    const forUser = user.id;
+    api.leaderboard('month').then((b) => {
+      if (ticket === boardSeq.current && boardUser.current === forUser) setMyBoard(b.me);
+    }).catch(() => {
+      if (ticket === boardSeq.current) setMyBoard(undefined);
+    });
     refreshUnread();
   }, [user?.id]));
 

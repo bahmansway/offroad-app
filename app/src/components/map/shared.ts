@@ -62,8 +62,10 @@ function escapeHtml(s: string): string {
  * Pin look (DESIGN-PASS P4): trail = white teardrop (40×48) with the level number (800) and a dark hairline;
  * camp = forest teardrop with a white tent; picked/selected = tint teardrop, white glyph, white 2 px border;
  * cluster (`.or-cluster`, for later) = ink circle, 3 px white border, count. Hit area is 44×48.
+ * `reduceMotion`: the phone's Reduce Motion setting (the WebView may not report prefers-reduced-motion),
+ * drops the pop animation; the CSS media query covers browsers.
  */
-export function pinCss(scheme: Scheme = 'light'): string {
+export function pinCss(scheme: Scheme = 'light', reduceMotion = false): string {
   const c = palettes[scheme];
   return `
 .or-pin{position:relative;width:44px;height:48px;box-sizing:border-box;padding:0;border:0;background:transparent;cursor:pointer;
@@ -75,7 +77,7 @@ filter:drop-shadow(0 4px 8px rgba(0,0,0,${Math.min(0.4, c.shadowOpacity + 0.12)}
 .or-pin--camp .or-drop path{fill:${c.forest};stroke:#FFFFFF;stroke-width:2}
 .or-pin--picked .or-drop path{fill:${c.tint};stroke:#FFFFFF;stroke-width:2}
 .or-pin--picked .or-glyph{color:${c.onTint}}
-.or-pin--picked{animation:or-pop .18s ease-out}
+${reduceMotion ? '' : '.or-pin--picked{animation:or-pop .18s ease-out}'}
 .or-pin:focus-visible{outline:3px solid ${c.tint};outline-offset:2px;border-radius:8px}
 .or-cluster{width:44px;height:44px;box-sizing:border-box;border-radius:22px;border:3px solid #FFFFFF;background:#1C1C1E;color:#FFFFFF;
 font:800 15px -apple-system,Inter,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
