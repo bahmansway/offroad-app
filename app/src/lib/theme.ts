@@ -194,12 +194,24 @@ export function signColors(level: number | null | undefined, scheme: Scheme): Si
   const c = palettes[scheme];
   const light = scheme === 'light';
   switch (level) {
-    case 1: return { plate: c.paper, text: c.paperText, num: c.paperText, numBg: 'rgba(255,255,255,0.6)', ring: null };
+    // numBg is drawn over the plate: tests blend it in (blendOver) before checking the number's contrast
+    case 1: return { plate: c.paper, text: c.paperText, num: c.paperText, numBg: light ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.08)', ring: null };
     case 2: return { plate: c.tintSoft, text: c.tintSoftText, num: c.tintSoftText, numBg: light ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.08)', ring: null };
-    case 3: return { plate: c.tint, text: c.onTint, num: c.onTint, numBg: light ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.1)', ring: null };
+    case 3: return { plate: c.tint, text: c.onTint, num: c.onTint, numBg: light ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.16)', ring: null };
     case 4: return { plate: c.ink, text: c.onInk, num: c.onInk, numBg: light ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)', ring: null };
-    default: return { plate: c.ink, text: c.onInk, num: light ? '#FF8A3D' : '#C2410C', numBg: light ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)', ring: c.tint };
+    default: return { plate: c.ink, text: c.onInk, num: light ? '#FF8A3D' : '#C2410C', numBg: light ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', ring: c.tint };
   }
+}
+
+/** Opaque colour of `rgba(r,g,b,a)` (or #RRGGBB) painted over the opaque `base` (#RRGGBB). */
+export function blendOver(top: string, base: string): string {
+  if (top.startsWith('#')) return top;
+  const m = top.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)/);
+  if (!m) return base;
+  const a = m[4] === undefined ? 1 : Number(m[4]);
+  const n = parseInt(base.replace('#', ''), 16);
+  const b = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return `#${[m[1], m[2], m[3]].map((v, i) => Math.round(Number(v) * a + b[i] * (1 - a)).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }
 
 /** WCAG contrast ratio of two opaque #RRGGBB colours (used by tests to keep text ≥ 4.5:1). */

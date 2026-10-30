@@ -2,10 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Avatar, EmptyState, ErrorState, Icon, IconButton, LoadingState, NavBar, Thumb, Txt, goBack, useTheme } from '../../components/ui';
+import { Avatar, EmptyState, ErrorState, Icon, IconButton, LoadingState, NavBar, Txt, goBack, useTheme } from '../../components/ui';
 import { RequireAuth } from '../../components/RequireAuth';
 import { ActionSheet, type SheetAction } from '../../components/ActionSheet';
-import { ClanLogo } from '../../components/ClanBits';
 import { photoUri } from '../../components/Rows';
 import { api } from '../../lib/api';
 import { ApiError } from '../../lib/apiClient';
@@ -16,7 +15,8 @@ import { chatErrorMessage, errorMessage } from '../../lib/errors';
 import { confirmAsync } from '../../lib/dialogs';
 import { formatDate, sameId } from '../../lib/format';
 import { canDeleteMessage, canPinMessage } from '../../lib/permissions';
-import { isSystem, messageText, systemText } from '../../lib/systemMessages';
+import { isSystem, messageText, systemLabelKey, systemText } from '../../lib/systemMessages';
+import { ConversationPicture } from '../../components/ChatRows';
 import { HAIRLINE, TAP, type as typeScale } from '../../lib/theme';
 import { tapFeedback } from '../../lib/haptics';
 import {
@@ -103,6 +103,8 @@ function Chat() {
       }),
       chat.on('pinned', (p) => { if (sameId(p.conversationId, id)) setPinned(p.pinned); }),
       chat.on('eventUpdated', (u) => { if (conv?.eventId && sameId(u.eventId, conv.eventId)) reloadConv(); }),
+      chat.on('groupUpdated', (g) => { if (sameId(g.conversationId, id)) reloadConv(); }),
+      chat.on('groupRemoved', (g) => { if (sameId(g.conversationId, id)) setNoAccess(true); }),
     ];
     return () => offs.forEach((off) => off());
   }, [chat, id, conv?.eventId, reloadConv]);
@@ -154,7 +156,7 @@ function Chat() {
       const kind = conv?.type ?? null;
       setSendError(chatErrorMessage(e, t, kind));
       // 404 = chat gone; 403 in a clan chat = removed from the clan (in a DM, 403 means blocked)
-      if (e instanceof ApiError && (e.status === 404 || (e.status === 403 && kind === 'clan'))) setNoAccess(true);
+      if (e instanceof ApiError && (e.status === 404 || (e.status === 403 && (kind === 'clan' || kind === 'group')))) setNoAccess(true);
       // event chat: 403 = became read-only (cancelled/finished) or I was removed → ask again
       if (e instanceof ApiError && e.status === 403 && kind === 'event') reloadConv();
     }
@@ -178,7 +180,8 @@ function Chat() {
   const rows = useMemo(() => buildRows(items, user?.id).reverse(), [items, user?.id]);
   const isClan = conv?.type === 'clan';
   const isEvent = conv?.type === 'event';
-  const group = isClan || isEvent;
+  const isGroup = conv?.type === 'group';
+  const group = isClan || isEvent || isGroup;
   const readOnly = !!conv?.readOnly;
   const muted = !!conv?.muted;
 
@@ -198,7 +201,7 @@ function Chat() {
   }
 
   async function del(m: ChatItem) {
-    if (!(await confirmAsync(t('chat.deleteConfirm'), t('common.delete'), t('common.cancel')))) return;
+    if (!(await confirmAsync(t('chat.deleteConfirm'), t('common.delete'), t('common.cancel'), { destructive: true }))) return;
     try {
       await api.deleteMessage(id, m.id);
       setItems((cur) => applyDeleted(cur, { id: m.id, deletedAt: new Date().toISOString() }));
@@ -233,6 +236,7 @@ function Chat() {
     if (!conv) return;
     if (conv.type === 'clan' && conv.clanId) router.push(`/clan/${conv.clanId}`);
     else if (conv.type === 'event' && conv.eventId) router.push(`/event/${conv.eventId}`);
+    else if (conv.type === 'group') router.push(`/chat/info/${conv.id}`);
     else if (conv.otherUser) router.push(`/user/${conv.otherUser.id}`);
   }
 
@@ -280,20 +284,16 @@ function Chat() {
             <Pressable
               onPress={openHeader}
               accessibilityRole="link"
-              accessibilityLabel={isClan ? t('chat.openClan') : isEvent ? t('chat.openEvent') : t('chat.openProfile')}
+              accessibilityLabel={isClan ? t('chat.openClan') : isEvent ? t('chat.openEvent') : isGroup ? t('group.infoA11y') : t('chat.openProfile')}
               hitSlop={6}
               style={{ minWidth: TAP, minHeight: TAP, alignItems: 'center', justifyContent: 'center' }}
             >
-              {isClan
-                ? <ClanLogo clan={{ id: conv.clanId ?? conv.id, tag: conv.title.slice(0, 2).toLocaleUpperCase(), logoUrl: conv.avatarUrl }} size={36} />
-                : isEvent
-                  ? <Thumb kind="event" uri={photoUri(conv.avatarUrl)} size={36} rounded={10} />
-                  : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={36} />}
+              <ConversationPicture conv={conv} size={36} />
             </Pressable>
           </View>
         ) : null}
         title={conv?.title}
-        subtitle={isClan ? t('chat.clanChat') : isEvent ? t('chat.eventChat') : muted ? t('chat.muted') : undefined}
+        subtitle={isClan ? t('chat.clanChat') : isEvent ? t('chat.eventChat') : isGroup ? t('chat.members', { count: conv?.memberCount ?? 0 }) : muted ? t('chat.muted') : undefined}
       />
       {pinned ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 16, paddingRight: 6, minHeight: 52, borderTopWidth: HAIRLINE, borderTopColor: c.separator }}>
@@ -376,7 +376,7 @@ function Chat() {
           value={text}
           onChange={setText}
           onSend={send}
-          placeholder={isClan ? t('chat.placeholderClan') : isEvent ? t('chat.placeholderEvent') : t('chat.placeholder')}
+          placeholder={isClan ? t('chat.placeholderClan') : isEvent ? t('chat.placeholderEvent') : isGroup ? t('group.placeholder') : t('chat.placeholder')}
           bottom={insets.bottom}
           disabled={!loaded}
         />
@@ -403,7 +403,7 @@ function RowView({ row, clan, words, onMenu, hasMenu }: {
     return (
       <View style={{ alignItems: 'center', paddingVertical: 6, paddingHorizontal: 24 }}>
         <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: c.fill, maxWidth: 520 }}
-          accessible accessibilityLabel={`${t('chat.systemMessage')}: ${text}, ${formatTime(row.msg.createdAt)}`}>
+          accessible accessibilityLabel={`${t(systemLabelKey(row.msg))}: ${text}, ${formatTime(row.msg.createdAt)}`}>
           <Txt variant="footnote" tone="label2" center>{text}</Txt>
         </View>
       </View>

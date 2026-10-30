@@ -59,6 +59,10 @@ const ICONS = {
   trail: { sf: 'point.topleft.down.to.point.bottomright.curvepath', d: 'M4 19c4 0 4-6 8-6s4-8 8-8' },
   route: { sf: 'arrow.triangle.swap', d: 'M6 19a2 2 0 1 0 0-4a2 2 0 1 0 0 4Z M18 9a2 2 0 1 0 0-4a2 2 0 1 0 0 4Z M8 17h6a3 3 0 0 0 0-6h-4a3 3 0 0 1 0-6h6' },
   wifi: { sf: 'wifi.exclamationmark', d: 'M2 9a15 15 0 0 1 20 0 M5.5 12.5a10 10 0 0 1 13 0 M9 16a5 5 0 0 1 6 0 M12 19.5h.01' },
+  trophy: { sf: 'trophy', d: 'M8 4h8v5a4 4 0 0 1-8 0Z M8 6H5a3 3 0 0 0 3 4 M16 6h3a3 3 0 0 1-3 4 M12 13v4 M8.5 20h7 M10 17h4v3h-4Z' },
+  compose: { sf: 'square.and.pencil', d: 'M12 4H5v15h15v-7 M18 3l3 3-8.5 8.5H9.5v-3Z' },
+  userCheck: { sf: 'person.badge.checkmark', d: 'M10 11a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M3 20a7 7 0 0 1 11-5.7 M15.5 17.5l2 2 4-4' },
+  userClock: { sf: 'person.badge.clock', d: 'M10 11a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M3 20a7 7 0 0 1 9.5-6.5 M18 21a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M18 15v2l1.2 1' },
   more: { sf: 'ellipsis', d: 'M3.2 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z M10.1 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z M17 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z', filled: true },
 } as const;
 

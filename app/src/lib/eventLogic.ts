@@ -187,11 +187,22 @@ export function isSoon(iso: string, now: Date = new Date(), days = 7): boolean {
   return t - now.getTime() < days * 24 * 60 * 60 * 1000;
 }
 
-/** Events list sections: "This week" (starts within 7 days) and "Later". Order is kept. */
+/** End of the current Baku calendar week (Mon–Sun): next Monday 00:00 in Baku, as a UTC instant. */
+export function bakuWeekEnd(now: Date = new Date()): Date {
+  const p = bakuParts(now);
+  const daysToMonday = ((8 - p.weekday) % 7) || 7; // getUTCDay: 0 = Sunday … 6 = Saturday
+  return fromBakuParts(p.year, p.month, p.day + daysToMonday, 0, 0);
+}
+
+/** Events list sections: "This week" = starts before the end of this Baku calendar week (Mon–Sun), "Later" = after. Order is kept. */
 export function groupByWeek<T extends { startsAt: string }>(items: T[], now: Date = new Date()): { thisWeek: T[]; later: T[] } {
+  const end = bakuWeekEnd(now).getTime();
   const thisWeek: T[] = [];
   const later: T[] = [];
-  for (const e of items) (isSoon(e.startsAt, now) ? thisWeek : later).push(e);
+  for (const e of items) {
+    const t = new Date(e.startsAt).getTime();
+    (!Number.isNaN(t) && t < end ? thisWeek : later).push(e);
+  }
   return { thisWeek, later };
 }
 

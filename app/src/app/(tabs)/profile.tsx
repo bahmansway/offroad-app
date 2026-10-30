@@ -4,7 +4,7 @@ import { router, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import { CarCell, photoUri } from '../../components/Rows';
 import {
-  Avatar, Cell, EmptyState, Icon, FormError, IconTile, LargeTitleScreen, PillButton, Section, SegmentedControl, Txt,
+  Avatar, Badge, Cell, EmptyState, Icon, FormError, IconTile, LargeTitleScreen, PillButton, Section, SegmentedControl, Txt,
   useTheme,
 } from '../../components/ui';
 import { api } from '../../lib/api';
@@ -15,7 +15,9 @@ import { errorMessage } from '../../lib/errors';
 import { pickPhoto } from '../../lib/photos';
 import { radius } from '../../lib/theme';
 import type { Lang } from '../../lib/format';
-import type { CarSummary } from '../../lib/types';
+import type { CarSummary, Leaderboard } from '../../lib/types';
+import { useChat } from '../../lib/chat';
+import { formatPoints, rankText } from '../../lib/leaderboardLogic';
 
 export default function ProfileScreen() {
   const { t, lang, setLang } = useI18n();
@@ -24,12 +26,16 @@ export default function ProfileScreen() {
   const [cars, setCars] = useState<CarSummary[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [myBoard, setMyBoard] = useState<Leaderboard['me'] | undefined>(undefined);
+  const { friendRequests, refreshUnread } = useChat();
 
   useFocusEffect(useCallback(() => {
     if (!user) { setCars(null); return; }
     api.cars(user.id).then((r) => setCars(r.items)).catch(() => setCars([]));
     // Current car may have been edited, re-photographed or deleted elsewhere.
     refreshUser().catch(() => {});
+    api.leaderboard('month').then((b) => setMyBoard(b.me)).catch(() => setMyBoard(undefined));
+    refreshUnread();
   }, [user?.id]));
 
   async function doLogout() {
@@ -131,6 +137,24 @@ export default function ProfileScreen() {
 
       <Section>
         <Cell title={t('profile.edit')} left={<IconTile icon="edit" />} onPress={() => router.push('/profile/edit')} />
+        <Cell
+          title={t('friends.row')}
+          subtitle={friendRequests ? t('tabs.friendRequests', { count: friendRequests }) : t('friends.rowSubtitle')}
+          left={<IconTile icon="people" tone="forest" />}
+          right={friendRequests ? <Badge text={String(friendRequests)} /> : undefined}
+          chevron
+          onPress={() => router.push(friendRequests ? '/friends?tab=in' : '/friends')}
+          accessibilityRole="link"
+        />
+        <Cell
+          title={t('profile.pointsRow')}
+          subtitle={myBoard === undefined ? undefined : myBoard?.rank
+            ? t('board.myMonth', { rank: rankText(myBoard.rank), points: formatPoints(myBoard.points, lang) })
+            : t('board.myMonthNone')}
+          left={<IconTile icon="trophy" tone="sand" />}
+          onPress={() => router.push('/leaderboard')}
+          accessibilityRole="link"
+        />
       </Section>
 
       <Section header={t('profile.currentCar')} footer={t('profile.currentCarHint')}>

@@ -9,8 +9,9 @@ import { badgeText } from '../../lib/chatLogic';
 export default function TabsLayout() {
   const { t } = useI18n();
   const { c } = useTheme();
-  const { unread } = useChat();
-  const badge = badgeText(unread);
+  const { chatBadge, friendRequests } = useChat();
+  const badge = badgeText(chatBadge);
+  const profileBadge = badgeText(friendRequests);
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
@@ -27,10 +28,19 @@ export default function TabsLayout() {
         options={{
           title: t('tabs.chat'),
           tabBarBadge: badge,
-          tabBarAccessibilityLabel: badge ? `${t('tabs.chat')}, ${t('chat.unread', { count: unread })}` : t('tabs.chat'),
+          tabBarAccessibilityLabel: badge ? `${t('tabs.chat')}, ${t('chat.unread', { count: chatBadge })}` : t('tabs.chat'),
         }}
       />
-      <Tabs.Screen name="profile" options={{ title: t('tabs.profile') }} />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: t('tabs.profile'),
+          tabBarBadge: profileBadge,
+          tabBarAccessibilityLabel: profileBadge
+            ? `${t('tabs.profile')}, ${t('tabs.friendRequests', { count: friendRequests })}`
+            : t('tabs.profile'),
+        }}
+      />
     </Tabs>
   );
 }

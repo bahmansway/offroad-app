@@ -1,28 +1,34 @@
 import React, { useCallback, useState } from 'react';
-import { View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { Avatar, Badge, Cell, EmptyState, ErrorState, Icon, IconTile, LargeTitleScreen, LoadingState, Section, Thumb, Txt, useTheme } from '../../components/ui';
-import { photoUri } from '../../components/Rows';
-import { ClanLogo } from '../../components/ClanBits';
+import { Badge, Cell, EmptyState, ErrorState, IconButton, IconTile, LargeTitleScreen, LoadingState, SearchField, Section, Txt, useTheme } from '../../components/ui';
+import { ConversationCell } from '../../components/ChatRows';
+import { SearchResults } from '../../components/SearchResults';
 import { useAuth } from '../../lib/auth';
 import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { errorMessage } from '../../lib/errors';
-import { listTime, previewText, visibleUnread } from '../../lib/chatLogic';
-import { messageText } from '../../lib/systemMessages';
-import type { Conversation } from '../../lib/types';
+import { useSearch } from '../../lib/useSearch';
 
 export default function ChatTab() {
   const { t } = useI18n();
   const { user, offline } = useAuth();
-  const { conversations, error, reload, status, reloadInvites } = useChat();
+  const { c } = useTheme();
+  const { conversations, reload, reloadInvites } = useChat();
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState('');
+  const search = useSearch(query, conversations);
+  const searching = query.trim().length > 0;
+  const searchBox = (
+    <SearchField value={query} onChangeText={setQuery} placeholder={t('chat.search')} label={t('chat.searchA11y')} />
+  );
 
   useFocusEffect(useCallback(() => { if (user) { reload(); reloadInvites(); } }, [user, reload, reloadInvites]));
 
   if (!user) {
     return (
       <LargeTitleScreen title={t('chat.title')}>
+        {searchBox}
+        {searching ? <SearchResults search={search} raw={query} /> : null}
         {offline ? <ErrorState message={t('errors.offline')} /> : (
           <EmptyState icon="chat" title={t('chat.loginPrompt')} actionLabel={t('common.login')} onAction={() => router.push('/login')} />
         )}
@@ -31,17 +37,42 @@ export default function ChatTab() {
     );
   }
 
-  const clanChats = (conversations ?? []).filter((c) => c.type === 'clan');
-  const dms = (conversations ?? []).filter((c) => c.type === 'dm');
-  const events = (conversations ?? []).filter((c) => c.type === 'event');
-
   return (
     <LargeTitleScreen
       title={t('chat.title')}
       onRefresh={async () => { setRefreshing(true); await Promise.all([reload(), reloadInvites()]); setRefreshing(false); }}
       refreshing={refreshing}
+      right={<IconButton icon="compose" label={t('group.newChatA11y')} color={c.tint} onPress={() => router.push('/chat/new')} />}
     >
+      {searchBox}
+      {searching ? <SearchResults search={search} raw={query} /> : <ChatList />}
+    </LargeTitleScreen>
+  );
+}
+
+function ChatList() {
+  const { t } = useI18n();
+  const { conversations, error, reload, status, friendRequests } = useChat();
+  const clanChats = (conversations ?? []).filter((c) => c.type === 'clan');
+  const dms = (conversations ?? []).filter((c) => c.type === 'dm' || c.type === 'group');
+  const events = (conversations ?? []).filter((c) => c.type === 'event');
+  return (
+    <>
       {status === 'offline' ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite">{t('chat.offline')}</Txt> : null}
+      {friendRequests > 0 ? (
+        <Section>
+          <Cell
+            title={t('friends.tabIncoming')}
+            subtitle={t('tabs.friendRequests', { count: friendRequests })}
+            left={<IconTile icon="invite" />}
+            right={<Badge text={String(friendRequests)} />}
+            chevron
+            onPress={() => router.push('/friends?tab=in')}
+            accessibilityRole="link"
+            accessibilityLabel={`${t('friends.title')}, ${t('tabs.friendRequests', { count: friendRequests })}`}
+          />
+        </Section>
+      ) : null}
       {clanChats.length ? (
         <Section header={t('chat.myClan')}>
           {clanChats.map((c) => <ConversationCell key={c.id} conv={c} />)}
@@ -62,7 +93,7 @@ export default function ChatTab() {
       ) : conversations && !clanChats.length && !events.length ? (
         <EmptyState illustration="mountain" title={t('chat.noChatsTitle')} text={t('chat.noChatsText')} actionLabel={t('chat.browseClans')} onAction={() => router.push('/clans')} />
       ) : null}
-    </LargeTitleScreen>
+    </>
   );
 }
 
@@ -84,60 +115,4 @@ function ClansEntry() {
       />
     </Section>
   );
-}
-
-function ConversationCell({ conv, last }: { conv: Conversation; last?: boolean }) {
-  const { t } = useI18n();
-  const { c } = useTheme();
-  const { user } = useAuth();
-  const preview = conv.lastMessage ? previewText(conv, user?.id, t('chat.you'), (m) => messageText(m, t)) : t('chat.noMessagesYet');
-  const time = conv.lastMessage ? listTime(conv.lastMessage.createdAt, new Date(), t('chat.yesterday')) : '';
-  const count = visibleUnread(conv);
-  const unread = count > 0;
-  const left = conv.type === 'clan'
-    ? <ClanLogo clan={{ id: conv.clanId ?? conv.id, tag: initialsOf(conv.title), logoUrl: conv.avatarUrl }} size={52} />
-    : conv.type === 'event'
-      ? <Thumb kind="event" uri={photoUri(conv.avatarUrl)} size={52} rounded={14} />
-      : <Avatar uri={photoUri(conv.avatarUrl)} name={conv.title} size={52} />;
-  const label = [
-    conv.type === 'clan' ? `${t('chat.clanChat')}: ${conv.title}` : conv.type === 'event' ? `${t('chat.eventChat')}: ${conv.title}` : conv.title,
-    preview,
-    time,
-    unread ? t('chat.unread', { count }) : null,
-    conv.muted ? t('chat.muted') : null,
-    conv.readOnly ? t('chat.readOnly') : null,
-  ].filter(Boolean).join(', ');
-  return (
-    <Cell
-      title={conv.title}
-      subtitle={preview}
-      left={left}
-      minHeight={72}
-      onPress={() => router.push(`/chat/${conv.id}`)}
-      accessibilityRole="link"
-      accessibilityLabel={label}
-      last={last}
-      chevron={false}
-      right={
-        <View style={{ alignItems: 'flex-end', gap: 6, alignSelf: 'stretch', justifyContent: 'center' }}>
-          <Txt variant="footnote" color={unread ? c.tint : c.label2}>{time}</Txt>
-          {unread ? (
-            <View style={{ minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: c.tint, alignItems: 'center', justifyContent: 'center' }}>
-              <Txt variant="caption" color={c.onTint} style={{ fontWeight: '700' }}>{count > 99 ? '99+' : String(count)}</Txt>
-            </View>
-          ) : conv.muted ? (
-            <View style={{ height: 22, justifyContent: 'center' }}><Icon name="bellOff" size={16} color={c.label2} /></View>
-          ) : conv.readOnly ? (
-            <View style={{ height: 22, justifyContent: 'center' }}><Icon name="lock" size={16} color={c.label2} /></View>
-          ) : <View style={{ height: 22 }} />}
-        </View>
-      }
-    />
-  );
-}
-
-function initialsOf(title: string) {
-  const w = title.trim().split(/\s+/).filter(Boolean);
-  if (!w.length) return '?';
-  return (w.length === 1 ? Array.from(w[0]).slice(0, 2) : [Array.from(w[0])[0], Array.from(w[1])[0]]).join('').toLocaleUpperCase();
 }

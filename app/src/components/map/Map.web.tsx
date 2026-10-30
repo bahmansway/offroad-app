@@ -59,11 +59,13 @@ export default function SpotMap(props: MapProps) {
       const p = e.lngLat.wrap();
       cb.current.onMapPress?.(p.lat, p.lng);
     });
+    // Once the map has loaded, later style errors (e.g. a light/dark setStyle on a flaky network) must not
+    // cover a working map with the error card: only a map that never loaded counts as failed.
+    let loadedOnce = false;
     map.on('error', (e) => {
-      // Only a style/tile network failure before load counts as "map failed"
-      if (!map.isStyleLoaded() && (e as { error?: { status?: number } }).error) setFailed(true);
+      if (!loadedOnce && !map.isStyleLoaded() && (e as { error?: { status?: number } }).error) setFailed(true);
     });
-    map.on('load', () => setFailed(false));
+    map.on('load', () => { loadedOnce = true; setFailed(false); });
     mapRef.current = map;
     // Attribution links: open in a new tab, never replace the app.
     const onLink = (ev: MouseEvent) => {

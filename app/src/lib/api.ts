@@ -2,6 +2,7 @@ import { createApiClient } from './apiClient';
 import { tokenStore, withLock } from './tokenStore';
 import { API_URL } from './config';
 import type {
+  Badges, ConversationMember, FriendItem, FriendRequest, FriendRequestResult, Leaderboard, LeaderboardPeriod, SearchResult,
   AuthResponse, Car, CarInput, CarSummary, CatalogBrand, CatalogModel, Clan, ClanInput, ClanMember, ClanRequest,
   ClanInvite, Conversation, EventCreateInput, EventDetail, EventInput, EventParticipant, EventScope, EventSummary, Id,
   MeInput, MemberRole, Message, Mod, ModInput, MyClanInvite, Pinned, PublicUser, RatingResult, ReportTarget, Spot,
@@ -136,6 +137,34 @@ export const api = {
   unpin: (id: Id) => r<void>(`/api/conversations/${enc(id)}/pin`, { method: 'DELETE' }),
   mute: (id: Id) => r<{ muted: boolean }>(`/api/conversations/${enc(id)}/mute`, { method: 'PUT' }),
   unmute: (id: Id) => r<{ muted: boolean }>(`/api/conversations/${enc(id)}/mute`, { method: 'DELETE' }),
+
+  // v4 groups
+  createGroup: (name: string, userIds: Id[]) =>
+    r<Conversation>('/api/conversations/group', { method: 'POST', body: { name, userIds } }),
+  renameGroup: (id: Id, name: string) => r<Conversation>(`/api/conversations/${enc(id)}`, { method: 'PATCH', body: { name } }),
+  uploadGroupAvatar: (id: Id, data: Uint8Array, contentType = 'image/jpeg') =>
+    r<{ avatarUrl: string | null }>(`/api/conversations/${enc(id)}/avatar`, { method: 'PUT', binary: { data, contentType } }),
+  deleteGroupAvatar: (id: Id) => r<void>(`/api/conversations/${enc(id)}/avatar`, { method: 'DELETE' }),
+  addGroupMembers: (id: Id, userIds: Id[]) =>
+    r<Conversation>(`/api/conversations/${enc(id)}/members`, { method: 'POST', body: { userIds } }),
+  /** your own id = leave */
+  removeGroupMember: (id: Id, userId: Id) =>
+    r<void>(`/api/conversations/${enc(id)}/members/${enc(userId)}`, { method: 'DELETE' }),
+  conversationMembers: (id: Id) => r<{ items: ConversationMember[] }>(`/api/conversations/${enc(id)}/members`),
+
+  // v4 friends
+  sendFriendRequest: (userId: Id) => r<FriendRequestResult>('/api/friends/requests', { method: 'POST', body: { userId } }),
+  friendRequests: (dir: 'in' | 'out') => r<{ items: FriendRequest[] }>('/api/friends/requests', { query: { dir } }),
+  acceptFriendRequest: (id: Id) => r<{ status: 'friends'; user: UserRef }>(`/api/friends/requests/${enc(id)}/accept`, { method: 'POST' }),
+  declineFriendRequest: (id: Id) => r<void>(`/api/friends/requests/${enc(id)}/decline`, { method: 'POST' }),
+  cancelFriendRequest: (id: Id) => r<void>(`/api/friends/requests/${enc(id)}`, { method: 'DELETE' }),
+  friends: (q?: string) => r<{ items: FriendItem[] }>('/api/friends', { query: { q } }),
+  unfriend: (userId: Id) => r<void>(`/api/friends/${enc(userId)}`, { method: 'DELETE' }),
+  badges: () => r<Badges>('/api/me/badges'),
+
+  // v4 search + leaderboard
+  search: (q: string) => r<SearchResult>('/api/search', { query: { q } }),
+  leaderboard: (period: LeaderboardPeriod) => r<Leaderboard>('/api/leaderboard', { query: { period } }),
 
   // safety
   block: (userId: Id) => r<void>(`/api/users/${enc(userId)}/block`, { method: 'POST' }),

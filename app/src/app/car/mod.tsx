@@ -69,7 +69,7 @@ export default function ModScreen() {
 
   async function remove() {
     if (!existing) return;
-    if (!(await confirmAsync(t('mod.deleteConfirm'), t('common.delete'), t('common.cancel')))) return;
+    if (!(await confirmAsync(t('mod.deleteConfirm'), t('common.delete'), t('common.cancel'), { destructive: true }))) return;
     try {
       await api.deleteMod(existing.id);
       goBack(`/car/${carId}`);

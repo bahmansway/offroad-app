@@ -39,6 +39,21 @@ export function systemText(m: Pick<Message, 'systemKey' | 'systemParams' | 'text
       const names = [...new Set(fields.map((f) => t(`system.fields.${f === 'spotId' ? 'spot' : f}`)))];
       return names.length ? t('system.editedFields', { fields: names.join(', ') }) : t('system.edited');
     }
+    // v4 group chats
+    case 'group.created':
+    case 'group.renamed': {
+      const by = str(p.byDisplayName).trim() || t('system.someone');
+      return t(m.systemKey === 'group.created' ? 'system.groupCreated' : 'system.groupRenamed', { by, group: str(p.name).trim() });
+    }
+    case 'group.added':
+    case 'group.removed': {
+      const by = str(p.byDisplayName).trim() || t('system.someone');
+      return t(m.systemKey === 'group.added' ? 'system.groupAdded' : 'system.groupRemoved', { by, name });
+    }
+    case 'group.left':
+      return t('system.groupLeft', { name });
+    case 'group.admin':
+      return t('system.groupAdmin', { name });
     default:
       return m.text || t('system.unknown');
   }
@@ -49,4 +64,9 @@ export function messageText(m: Pick<Message, 'type' | 'systemKey' | 'systemParam
   if (isDeleted(m)) return t('chat.deleted');
   if (isSystem(m)) return systemText(m, t);
   return m.text;
+}
+
+/** Screen-reader prefix for a system line: "Qrup yeniliyi" in groups, "Tədbir yeniliyi" otherwise. */
+export function systemLabelKey(m: Pick<Message, 'systemKey'>): string {
+  return typeof m.systemKey === 'string' && m.systemKey.startsWith('group.') ? 'chat.groupUpdate' : 'chat.systemMessage';
 }

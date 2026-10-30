@@ -1,5 +1,5 @@
 import {
-  contrastRatio, palettes, signColors, terrain, thumbTone, TERRAIN_TONES, type Scheme,
+  blendOver, contrastRatio, palettes, signColors, terrain, thumbTone, TERRAIN_TONES, type Scheme,
 } from '../theme';
 import { carTotalDisplay, formatAvg, formatPrice, formatShortDate } from '../format';
 import { groupByWeek, isSoon } from '../eventLogic';
@@ -22,6 +22,8 @@ describe('trail-sign difficulty colours', () => {
         const col = signColors(n, sc)!;
         expect(contrastRatio(col.text, col.plate)).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(col.num, col.plate)).toBeGreaterThanOrEqual(4.5);
+        // the number sits on the translucent numBg square, not on the bare plate
+        expect(contrastRatio(col.num, blendOver(col.numBg, col.plate))).toBeGreaterThanOrEqual(4.5);
       }
     }
   });
@@ -35,6 +37,14 @@ describe('trail-sign difficulty colours', () => {
   it('has short level words in both languages', () => {
     expect(az.levels.short).toEqual(['Asan', 'Orta', 'Çətin', 'Ekstrem', 'Peşəkar']);
     expect(en.levels.short).toHaveLength(5);
+  });
+});
+
+describe('blendOver', () => {
+  it('paints rgba over an opaque base', () => {
+    expect(blendOver('rgba(255,255,255,0.5)', '#000000')).toBe('#808080');
+    expect(blendOver('rgba(0,0,0,0)', '#C2410C')).toBe('#C2410C');
+    expect(blendOver('#123456', '#FFFFFF')).toBe('#123456');
   });
 });
 
@@ -108,15 +118,16 @@ describe('short list dates', () => {
 
 describe('events: this week / later', () => {
   const now = new Date('2026-10-29T10:00:00Z');
-  it('groups by the next 7 days and keeps order', () => {
+  it('groups by the Baku calendar week (Mon–Sun) and keeps order', () => {
     const items = [
       { id: 1, startsAt: '2026-10-30T05:00:00Z' },
       { id: 2, startsAt: '2026-11-20T05:00:00Z' },
-      { id: 3, startsAt: '2026-11-04T05:00:00Z' },
+      { id: 3, startsAt: '2026-11-04T05:00:00Z' }, // next Wednesday: within 7 days, but next week
+      { id: 4, startsAt: '2026-11-01T10:00:00Z' }, // Sunday
     ];
     const g = groupByWeek(items, now);
-    expect(g.thisWeek.map((e) => e.id)).toEqual([1, 3]);
-    expect(g.later.map((e) => e.id)).toEqual([2]);
+    expect(g.thisWeek.map((e) => e.id)).toEqual([1, 4]);
+    expect(g.later.map((e) => e.id)).toEqual([2, 3]);
     expect(isSoon('2026-11-05T10:00:00Z', now)).toBe(false);
     expect(isSoon('bad', now)).toBe(false);
   });

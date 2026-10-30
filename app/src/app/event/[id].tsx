@@ -138,7 +138,7 @@ export default function EventScreen() {
     (r) => ((r as EventDetail).myStatus === 'waitlist' ? t('events.waitlisted') : t('events.joined')),
   );
   const leave = async () => {
-    if (!(await confirmAsync(t('events.leaveConfirm'), t('events.leave'), t('common.cancel')))) return;
+    if (!(await confirmAsync(t('events.leaveConfirm'), t('events.leave'), t('common.cancel'), { destructive: true }))) return;
     act('leave', () => api.leaveEvent(id), t('events.left'));
   };
 
@@ -194,7 +194,7 @@ export default function EventScreen() {
         label: t('events.removeParticipant'),
         destructive: true,
         onPress: async () => {
-          if (!(await confirmAsync(t('events.removeConfirm', { name: p.user.displayName }), t('common.remove'), t('common.cancel')))) return;
+          if (!(await confirmAsync(t('events.removeConfirm', { name: p.user.displayName }), t('common.remove'), t('common.cancel'), { destructive: true }))) return;
           act(`rm:${p.user.id}`, () => api.removeParticipant(id, p.user.id), t('events.removed', { name: p.user.displayName }));
         },
       });

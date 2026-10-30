@@ -92,12 +92,14 @@ export default function ExploreScreen() {
 
       {/* floating controls */}
       <View pointerEvents="box-none" style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 12, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           <SearchField glass value={query} onChangeText={setQuery} placeholder={t('explore.search')} label={t('explore.searchLabel')} style={{ flex: 1 }} />
           <View>
             <IconButton icon="filter" label={t('explore.filters')} glass size={50} onPress={() => setLevelOpen((o) => !o)} color={levelActive ? c.tint : c.label} />
             {levelActive ? <View style={{ position: 'absolute', top: 4, right: 4, width: 10, height: 10, borderRadius: 5, backgroundColor: c.tint }} /> : null}
           </View>
+          <IconButton icon="people" label={t('search.openExplore')} glass size={50} onPress={() => router.push('/search')} color={c.label} />
+          <IconButton icon="trophy" label={t('board.open')} glass size={50} onPress={() => router.push('/leaderboard')} color={c.tint} />
         </View>
         <SegmentedControl<TypeFilter>
           glass

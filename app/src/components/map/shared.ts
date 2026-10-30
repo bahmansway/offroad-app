@@ -74,11 +74,13 @@ filter:drop-shadow(0 4px 8px rgba(0,0,0,${Math.min(0.4, c.shadowOpacity + 0.12)}
 .or-pin .or-glyph{position:absolute;left:12px;top:8px;width:20px;height:20px;color:#FFFFFF}
 .or-pin--camp .or-drop path{fill:${c.forest};stroke:#FFFFFF;stroke-width:2}
 .or-pin--picked .or-drop path{fill:${c.tint};stroke:#FFFFFF;stroke-width:2}
+.or-pin--picked .or-glyph{color:${c.onTint}}
 .or-pin--picked{animation:or-pop .18s ease-out}
 .or-pin:focus-visible{outline:3px solid ${c.tint};outline-offset:2px;border-radius:8px}
 .or-cluster{width:44px;height:44px;box-sizing:border-box;border-radius:22px;border:3px solid #FFFFFF;background:#1C1C1E;color:#FFFFFF;
 font:800 15px -apple-system,Inter,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
 @keyframes or-pop{from{transform:scale(.6)}to{transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){.or-pin--picked{animation:none}}
 .maplibregl-ctrl-attrib{font:500 11px -apple-system,Inter,sans-serif}
 `;
 }

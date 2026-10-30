@@ -34,9 +34,11 @@ function buildHtml(center: [number, number], zoom: number, scheme: Scheme): stri
   map.touchZoomRotate.disableRotation();
   var markers=[];
   map.on('click',function(e){ var p=e.lngLat.wrap(); send({type:'mapPress',lat:p.lat,lng:p.lng}); });
-  map.on('load',function(){ send({type:'loaded'}); });
-  // A style/tile network failure before the first load counts as "map failed" (same rule as the web map).
-  map.on('error',function(e){ if(!map.isStyleLoaded() && e && e.error){ send({type:'failed'}); } });
+  var loadedOnce=false;
+  map.on('load',function(){ loadedOnce=true; send({type:'loaded'}); });
+  // A style/tile network failure before the FIRST load counts as "map failed" (same rule as the web map);
+  // after that (e.g. a light/dark setStyle) the working map stays on screen.
+  map.on('error',function(e){ if(!loadedOnce && !map.isStyleLoaded() && e && e.error){ send({type:'failed'}); } });
   // Attribution links open in the phone browser, not inside the map view.
   document.addEventListener('click',function(e){
     var a=e.target && e.target.closest ? e.target.closest('a[href]') : null;

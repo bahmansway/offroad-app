@@ -178,9 +178,15 @@ export interface PublicUser {
   city?: string | null;
   currentCar?: CarSummary | null;
   /** v2 clans — filled by the server; the chat builder uses it */
-  clan?: { id: Id; name: string; tag: string; logoUrl: string | null; role: string } | null;
+  clan?: { id: Id; name: string; tag: string; logoUrl: string | null; role: string; title?: ClanTitle } | null;
   /** true when I blocked this user */
   isBlocked?: boolean;
+  // v4 friends
+  friendship?: Friendship;
+  /** set when friendship is outgoing / incoming: use it for accept / decline / cancel */
+  requestId?: Id | null;
+  friendCount?: number;
+  mutualFriends?: number;
 }
 
 export interface AuthResponse {
@@ -224,6 +230,8 @@ export interface Clan {
   /** null unless I am a member */
   conversationId: Id | null;
   createdAt: string;
+  /** v4: sum of the current members' points this Baku month */
+  monthPoints?: number;
 }
 
 export interface ClanInput {
@@ -234,10 +242,16 @@ export interface ClanInput {
   isOpen?: boolean;
 }
 
+/** v4 display title: leader = Karvan başçısı, officer = Bələdçi, member = Sürücü, member < 30 days = Yeni sürücü */
+export type ClanTitle = 'leader' | 'navigator' | 'driver' | 'rookie';
+
 export interface ClanMember {
   user: UserRef;
   role: MemberRole;
   joinedAt: string;
+  // v4
+  title?: ClanTitle;
+  monthPoints?: number;
 }
 
 export interface ClanRequest {
@@ -270,9 +284,11 @@ export interface Pinned {
   pinnedAt: string | null;
 }
 
+export type ConversationType = 'dm' | 'clan' | 'event' | 'group';
+
 export interface Conversation {
   id: Id;
-  type: 'dm' | 'clan' | 'event';
+  type: ConversationType;
   title: string;
   avatarUrl: string | null;
   clanId: Id | null;
@@ -287,6 +303,10 @@ export interface Conversation {
   readOnlyUntil?: string | null;
   pinned?: Pinned | null;
   canPin?: boolean;
+  // v4 groups (adminId null and isAdmin false for other types)
+  adminId?: Id | null;
+  isAdmin?: boolean;
+  memberCount?: number;
 }
 
 /** `conversation:updated` socket payload */
@@ -403,3 +423,93 @@ export interface MyClanInvite {
 export interface MessageDeleted { id: Id; conversationId: Id; deletedAt: string }
 /** `conversation:pinned` socket payload */
 export interface ConversationPinned { conversationId: Id; pinned: Pinned | null }
+
+// ---------- v4 friends, search, groups, leaderboard ----------
+export type Friendship = 'none' | 'friends' | 'outgoing' | 'incoming';
+
+export interface FriendRequest {
+  id: Id;
+  from: UserRef;
+  to: UserRef;
+  createdAt: string;
+}
+
+export interface FriendItem {
+  user: UserRef;
+  since: string;
+}
+
+/** POST /api/friends/requests */
+export interface FriendRequestResult {
+  status: 'pending' | 'friends';
+  request: FriendRequest | null;
+  user: UserRef;
+}
+
+export interface Badges {
+  messages: number;
+  friendRequests: number;
+  clanInvites: number;
+}
+
+export interface UserSearchItem extends UserRef {
+  city: string | null;
+  isFriend: boolean;
+}
+
+export interface ClanSearchItem {
+  id: Id;
+  name: string;
+  tag: string;
+  logoUrl: string | null;
+  city: string | null;
+  isOpen: boolean;
+  memberCount: number;
+}
+
+export interface SearchResult {
+  users: UserSearchItem[];
+  clans: ClanSearchItem[];
+  conversations: Conversation[];
+}
+
+export interface ConversationMember {
+  user: UserRef;
+  isAdmin: boolean;
+  joinedAt: string;
+}
+
+export type LeaderboardPeriod = 'month' | 'all';
+
+export interface LeaderboardBreakdown {
+  spots: number;
+  events: number;
+  attended: number;
+  cars: number;
+  ratings: number;
+}
+
+export interface LeaderboardItem {
+  rank: number;
+  user: UserRef & {
+    currentCar: { id: Id; make: string; model: string; year: number; photoUrl: string | null } | null;
+    clan: { id: Id; name: string; tag: string } | null;
+  };
+  points: number;
+  breakdown: LeaderboardBreakdown;
+  /** you and this user blocked each other: show the row, don't open the profile */
+  blocked: boolean;
+}
+
+export interface Leaderboard {
+  period: LeaderboardPeriod;
+  monthStart: string;
+  computedAt: string;
+  items: LeaderboardItem[];
+  me: { rank: number | null; points: number } | null;
+}
+
+/** `group:updated` / `group:removed` socket payloads */
+export interface GroupEvent { conversationId: Id }
+/** `friend:accepted` socket payload (`user` = the other person) */
+export interface FriendAccepted { user: UserRef }

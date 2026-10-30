@@ -1,4 +1,4 @@
-import type { ClanRole, Conversation, Id, MemberRole, Message, PublicUser } from './types';
+import type { ClanRole, ClanTitle, Conversation, Id, MemberRole, Message, PublicUser } from './types';
 import { sameId } from './format';
 
 /**
@@ -57,6 +57,49 @@ export function memberActions(me: ClanRole | undefined | null, target: MemberRol
 /** Badge label key for a member role ("clan.leader" / "clan.officer"); members get none. */
 export function roleBadgeKey(role: MemberRole): string | null {
   return role === 'leader' ? 'clan.leader' : role === 'officer' ? 'clan.officer' : null;
+}
+
+// ---------- v4 driver titles ----------
+export const ROOKIE_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Display title of a clan member. The server sends `title`; when it's missing (older server) it is
+ * derived the same way: leader → leader, officer → navigator, member < 30 days → rookie, else driver.
+ * Permissions still use `role`.
+ */
+export function clanTitleOf(
+  m: { role: MemberRole | string; title?: ClanTitle | null; joinedAt?: string | null },
+  now: Date = new Date(),
+): ClanTitle {
+  if (m.title === 'leader' || m.title === 'navigator' || m.title === 'driver' || m.title === 'rookie') return m.title;
+  if (m.role === 'leader') return 'leader';
+  if (m.role === 'officer') return 'navigator';
+  const joined = m.joinedAt ? Date.parse(m.joinedAt) : NaN;
+  if (!Number.isNaN(joined) && now.getTime() - joined < ROOKIE_DAYS * DAY_MS) return 'rookie';
+  return 'driver';
+}
+
+/** i18n key: "clan.titles.leader" → Karvan başçısı / Convoy leader … */
+export function titleKey(title: ClanTitle): string {
+  return `clan.titles.${title}`;
+}
+
+/** Badge tone per title: leader in tint, navigator stone, drivers gray, rookies forest (new growth). */
+export function titleTone(title: ClanTitle): 'tint' | 'stone' | 'gray' | 'forest' {
+  return title === 'leader' ? 'tint' : title === 'navigator' ? 'stone' : title === 'rookie' ? 'forest' : 'gray';
+}
+
+const TITLE_ORDER: Record<ClanTitle, number> = { leader: 0, navigator: 1, driver: 2, rookie: 3 };
+
+/** Same order as the server: title, then points this month (high first), then join time. */
+export function sortClanMembers<M extends { role: MemberRole; title?: ClanTitle; joinedAt: string; monthPoints?: number }>(
+  list: M[], now: Date = new Date(),
+): M[] {
+  return [...list].sort((a, b) =>
+    TITLE_ORDER[clanTitleOf(a, now)] - TITLE_ORDER[clanTitleOf(b, now)]
+    || (b.monthPoints ?? 0) - (a.monthPoints ?? 0)
+    || Date.parse(a.joinedAt) - Date.parse(b.joinedAt));
 }
 
 /**

@@ -62,7 +62,7 @@ export default function CarScreen() {
   }
 
   async function removeCar() {
-    if (!(await confirmAsync(t('garage.deleteCarConfirm'), t('common.delete'), t('common.cancel')))) return;
+    if (!(await confirmAsync(t('garage.deleteCarConfirm'), t('common.delete'), t('common.cancel'), { destructive: true }))) return;
     try {
       await api.deleteCar(car!.id);
       router.replace('/garage');

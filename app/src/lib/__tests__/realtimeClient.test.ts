@@ -322,3 +322,34 @@ describe('v3 socket events', () => {
     c.stop();
   });
 });
+
+describe('v4 socket events', () => {
+  it('forwards friend:request, friend:accepted, group:updated and group:removed; ignores junk', async () => {
+    let sock: FakeSocket | null = null;
+    const got: string[] = [];
+    const c = createRealtimeClient({
+      url: 'http://x',
+      io: (_u, o) => (sock = new FakeSocket(o)),
+      getToken: async () => 'tok',
+      refresh: async () => null,
+      timers: fakeTimers(),
+      onFriendRequest: (r) => got.push(`req:${r.id}`),
+      onFriendAccepted: (a) => got.push(`acc:${a.user.id}`),
+      onGroupUpdated: (g) => got.push(`gu:${g.conversationId}`),
+      onGroupRemoved: (g) => got.push(`gr:${g.conversationId}`),
+    });
+    c.start();
+    await flush();
+    sock!.ready();
+    const ref = { id: 'u1', displayName: 'A', avatarUrl: null };
+    sock!.emit('friend:request', { id: 'r1', from: ref, to: ref, createdAt: '' });
+    sock!.emit('friend:accepted', { user: ref });
+    sock!.emit('group:updated', { conversationId: 'g1' });
+    sock!.emit('group:removed', { conversationId: 'g1' });
+    sock!.emit('friend:request', null);
+    sock!.emit('friend:accepted', {});
+    sock!.emit('group:updated', {});
+    expect(got).toEqual(['req:r1', 'acc:u1', 'gu:g1', 'gr:g1']);
+    c.stop();
+  });
+});

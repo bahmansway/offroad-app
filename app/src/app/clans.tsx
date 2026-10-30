@@ -58,7 +58,7 @@ export default function ClansScreen() {
 
   async function answer(inv: MyClanInvite, accept: boolean) {
     // declining blocks a new invite from this clan for 24 h, so ask first
-    if (!accept && !(await confirmAsync(t('clan.declineConfirm', { name: inv.clan.name }), t('clan.decline'), t('common.cancel')))) return;
+    if (!accept && !(await confirmAsync(t('clan.declineConfirm', { name: inv.clan.name }), t('clan.decline'), t('common.cancel'), { destructive: true }))) return;
     setBusy(`${accept ? 'a' : 'd'}:${inv.id}`);
     setNote(null);
     try {

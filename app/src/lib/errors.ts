@@ -35,9 +35,9 @@ export function errorMessage(e: unknown, t: T, context: ErrorContext = 'default'
 }
 
 /** Chat send errors → short sentence. In a clan chat 403 means "not a member any more"; in a DM it means blocked. */
-export function chatErrorMessage(e: unknown, t: T, kind: 'dm' | 'clan' | 'event' | null = 'dm'): string {
+export function chatErrorMessage(e: unknown, t: T, kind: 'dm' | 'clan' | 'event' | 'group' | null = 'dm'): string {
   if (e instanceof ApiError) {
-    if (e.code === 'FORBIDDEN') return kind === 'clan' || kind === 'event' ? t('chat.noAccess') : t('chat.blockedCannotSend');
+    if (e.code === 'FORBIDDEN') return kind === 'clan' || kind === 'event' || kind === 'group' ? t('chat.noAccess') : t('chat.blockedCannotSend');
     if (e.code === 'RATE_LIMITED') return t('chat.rateLimited');
     if (e.code === 'NOT_FOUND') return t('chat.noAccess');
   }

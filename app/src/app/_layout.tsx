@@ -40,6 +40,8 @@ function AppStack() {
         <Stack.Screen name="clan/new" options={sheet} />
         <Stack.Screen name="clan/edit/[id]" options={sheet} />
         <Stack.Screen name="event/cancel/[id]" options={sheet} />
+        <Stack.Screen name="leaderboard-info" options={sheet} />
+        <Stack.Screen name="chat/add-members/[id]" options={sheet} />
       </Stack>
     </>
   );

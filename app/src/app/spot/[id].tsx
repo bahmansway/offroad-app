@@ -59,7 +59,7 @@ export default function SpotScreen() {
   }
 
   async function remove() {
-    if (!(await confirmAsync(t('spot.deleteConfirm'), t('common.delete'), t('common.cancel')))) return;
+    if (!(await confirmAsync(t('spot.deleteConfirm'), t('common.delete'), t('common.cancel'), { destructive: true }))) return;
     try {
       await api.deleteSpot(spot!.id);
       router.replace('/');

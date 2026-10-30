@@ -2,12 +2,13 @@ import React, { useCallback, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
-  Avatar, Badge, Cell, EmptyState, ErrorState, IconButton, LoadingState, NavScreen, PillButton, Section, Txt, useTheme,
+  Avatar, Badge, Cell, EmptyState, ErrorState, FactTile, IconButton, LoadingState, NavScreen, PillButton, Section, Txt, useTheme,
 } from '../../components/ui';
 import { ActionSheet, type SheetAction } from '../../components/ActionSheet';
 import { ClanLogo, clanMeta } from '../../components/ClanBits';
 import { EventList } from '../../components/EventCard';
-import { clanPermissions, isClanMember, memberActions as allowedActions, roleBadgeKey } from '../../lib/permissions';
+import { clanPermissions, clanTitleOf, isClanMember, memberActions as allowedActions, sortClanMembers, titleKey, titleTone } from '../../lib/permissions';
+import { formatPoints } from '../../lib/leaderboardLogic';
 import { photoUri } from '../../components/Rows';
 import { api } from '../../lib/api';
 import { ApiError } from '../../lib/apiClient';
@@ -124,11 +125,11 @@ export default function ClanScreen() {
   const login = () => router.push('/login');
   const join = () => act('join', () => api.joinClan(clan.id));
   const leave = async () => {
-    if ((role === 'member' || role === 'officer') && !(await confirmAsync(t('clan.leaveConfirm'), t('clan.leave'), t('common.cancel')))) return;
+    if ((role === 'member' || role === 'officer') && !(await confirmAsync(t('clan.leaveConfirm'), t('clan.leave'), t('common.cancel'), { destructive: true }))) return;
     act('leave', () => api.leaveClan(clan.id));
   };
   const del = async () => {
-    if (!(await confirmAsync(t('clan.deleteConfirm'), t('common.delete'), t('common.cancel')))) return;
+    if (!(await confirmAsync(t('clan.deleteConfirm'), t('common.delete'), t('common.cancel'), { destructive: true }))) return;
     setBusy('delete');
     setNote(null);
     try {
@@ -173,7 +174,7 @@ export default function ClanScreen() {
             label: t('clan.remove'),
             destructive: true,
             onPress: async () => {
-              if (!(await confirmAsync(t('clan.removeConfirm', { name }), t('common.remove'), t('common.cancel')))) return;
+              if (!(await confirmAsync(t('clan.removeConfirm', { name }), t('common.remove'), t('common.cancel'), { destructive: true }))) return;
               act(`rm:${m.user.id}`, () => api.removeMember(cid, m.user.id));
             },
           };
@@ -211,6 +212,13 @@ export default function ClanScreen() {
         <Badge text={clan.isOpen ? t('clan.open') : t('clan.request')} tone="gray" />
         {clan.description ? <Txt variant="subhead" center style={{ maxWidth: 460 }}>{clan.description}</Txt> : null}
       </View>
+
+      {typeof clan.monthPoints === 'number' ? (
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <FactTile icon="trophy" tone="sand" label={t('clan.monthPoints')} value={t('clan.monthPointsValue', { points: formatPoints(clan.monthPoints, lang) })} />
+          <FactTile icon="people" tone="stone" label={t('clan.members')} value={String(members?.length ?? clan.memberCount)} />
+        </View>
+      ) : null}
 
       {mainButton}
       {note ? (
@@ -260,7 +268,7 @@ export default function ClanScreen() {
                 <PillButton title={t('clan.revoke')} variant="gray" size="small" style={{ paddingHorizontal: 12 }}
                   loading={busy === `inv:${inv.id}`} accessibilityLabel={`${t('clan.revoke')}: ${inv.user.displayName}`}
                   onPress={async () => {
-                    if (!(await confirmAsync(t('clan.revokeConfirm', { name: inv.user.displayName }), t('clan.revoke'), t('common.cancel')))) return;
+                    if (!(await confirmAsync(t('clan.revokeConfirm', { name: inv.user.displayName }), t('clan.revoke'), t('common.cancel'), { destructive: true }))) return;
                     act(`inv:${inv.id}`, () => api.revokeInvite(clan.id, inv.id));
                   }} />
               }
@@ -278,20 +286,22 @@ export default function ClanScreen() {
         )}
       </View>
 
-      <Section header={`${t('clan.members')} · ${members?.length ?? clan.memberCount}`}>
-        {members === null ? <LoadingState inline /> : members.map((m) => {
+      <Section header={`${t('clan.members')} · ${members?.length ?? clan.memberCount}`} footer={t('clan.titlesHint')}>
+        {members === null ? <LoadingState inline /> : sortClanMembers(members).map((m) => {
           const isMe = sameId(m.user.id, user?.id);
-          const badgeKey = roleBadgeKey(m.role);
+          const title = clanTitleOf(m);
+          const titleText = t(titleKey(title));
           const hasMenu = allowedActions(role, m.role, isMe).length > 1;
+          const pts = typeof m.monthPoints === 'number' ? t('clan.memberPoints', { points: formatPoints(m.monthPoints, lang) }) : null;
           return (
             <Cell
               key={m.user.id}
               title={isMe ? `${m.user.displayName} (${t('chat.you')})` : m.user.displayName}
-              subtitle={t('clan.since', { date: formatDate(m.joinedAt) })}
+              subtitle={pts ?? t('clan.since', { date: formatDate(m.joinedAt) })}
               left={<Avatar uri={photoUri(m.user.avatarUrl)} name={m.user.displayName} size={40} />}
-              right={badgeKey ? <Badge text={t(badgeKey)} tone={m.role === 'leader' ? 'tint' : 'gray'} /> : undefined}
+              right={<Badge text={titleText} tone={titleTone(title)} />}
               onPress={hasMenu ? () => setMenuFor(m) : () => router.push(`/user/${m.user.id}`)}
-              accessibilityLabel={`${m.user.displayName}${badgeKey ? `, ${t(badgeKey)}` : ''}`}
+              accessibilityLabel={[m.user.displayName, titleText, pts].filter(Boolean).join(', ')}
               accessibilityRole={hasMenu ? 'button' : 'link'}
             />
           );

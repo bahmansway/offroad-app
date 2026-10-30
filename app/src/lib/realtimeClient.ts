@@ -1,4 +1,6 @@
-import type { ConversationPinned, ConversationUpdate, Id, Message, MessageDeleted, MyClanInvite } from './types';
+import type {
+  ConversationPinned, ConversationUpdate, FriendAccepted, FriendRequest, GroupEvent, Id, Message, MessageDeleted, MyClanInvite,
+} from './types';
 
 /**
  * Live chat connection (Socket.IO). No React here so the reconnect rules can be unit-tested.
@@ -51,6 +53,14 @@ export interface RealtimeOptions {
   onEventUpdated?: (e: { eventId: Id }) => void;
   /** v3: `clan:invite` (someone invited me) */
   onClanInvite?: (i: MyClanInvite) => void;
+  /** v4: `friend:request` (someone sent me a request) */
+  onFriendRequest?: (r: FriendRequest) => void;
+  /** v4: `friend:accepted` (we are friends now; `user` = the other person) */
+  onFriendAccepted?: (a: FriendAccepted) => void;
+  /** v4: `group:updated` (members / name / photo / admin changed) */
+  onGroupUpdated?: (g: GroupEvent) => void;
+  /** v4: `group:removed` (I was removed or left) */
+  onGroupRemoved?: (g: GroupEvent) => void;
   onStatus?: (s: RealtimeStatus) => void;
   /** fires right after a (re)connect is ready, so the app can catch up on what it missed */
   onReady?: () => void;
@@ -193,6 +203,10 @@ export function createRealtimeClient(o: RealtimeOptions) {
     s.on('conversation:pinned', (p: ConversationPinned) => { if (p && p.conversationId != null) o.onPinned?.(p); });
     s.on('event:updated', (e: { eventId: Id }) => { if (e && e.eventId != null) o.onEventUpdated?.(e); });
     s.on('clan:invite', (i: MyClanInvite) => { if (i && i.id != null) o.onClanInvite?.(i); });
+    s.on('friend:request', (r: FriendRequest) => { if (r && r.id != null) o.onFriendRequest?.(r); });
+    s.on('friend:accepted', (a: FriendAccepted) => { if (a && a.user && a.user.id != null) o.onFriendAccepted?.(a); });
+    s.on('group:updated', (g: GroupEvent) => { if (g && g.conversationId != null) o.onGroupUpdated?.(g); });
+    s.on('group:removed', (g: GroupEvent) => { if (g && g.conversationId != null) o.onGroupRemoved?.(g); });
     s.on('connect_error', (err: { message?: string } | undefined) => {
       if (stopped) return;
       setStatus('offline');
