@@ -17,7 +17,9 @@ export function shortEngine(car: Pick<Car, 'engine' | 'engineL'>): string {
   if (car.engine) {
     // "4.0 V6 petrol" → "4.0 V6" (fuel has its own tile)
     const m = car.engine.match(/^(\d+(?:[.,]\d)?\s*(?:L\b)?\s*(?:[VWIL]\d{1,2}|R\d|B\d)?)/i);
-    return (m?.[1] ?? car.engine).trim() || car.engine;
+    const s = (m?.[1] ?? car.engine).trim() || car.engine;
+    // A bare size like "3.2" gets its unit: "3.2 L".
+    return /^\d+(?:[.,]\d)?$/.test(s) ? `${s} L` : s;
   }
   return `${car.engineL} L`;
 }
