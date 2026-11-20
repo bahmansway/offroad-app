@@ -59,6 +59,12 @@ const BAKU_OFFSET = 4 * HOUR;
 /** SQL list of all demo user ids. Demo emails are stored lower-case. */
 const demoIds = sql.raw(`(select id from users where lower(email) like '%@${DEMO_EMAIL_DOMAIN}')`);
 
+/** Subtle markers so real testers know this is demo content (bios, upcoming events). */
+export const DEMO_BIO_MARK = 'Demo hesab';
+export const DEMO_EVENT_MARK = '— Demo tədbir, real deyil.';
+/** Demo password minimum length. */
+export const DEMO_PASSWORD_MIN = 16;
+
 export const demoEmail = (slug: string) => `${slug}@${DEMO_EMAIL_DOMAIN}`;
 
 export type DemoCounts = {
@@ -88,7 +94,9 @@ export async function seedDemo(
   opts: { password?: string; now?: Date } = {},
 ): Promise<{ skipped: true } | { skipped: false; counts: DemoCounts }> {
   const password = opts.password ?? process.env.DEMO_PASSWORD;
-  if (!password || password.length < 8) throw new Error('DEMO_PASSWORD (at least 8 characters) is required to seed demo data');
+  if (!password || password.length < DEMO_PASSWORD_MIN) {
+    throw new Error(`DEMO_PASSWORD (at least ${DEMO_PASSWORD_MIN} characters) is required to seed demo data`);
+  }
   if (await hasDemo(db)) return { skipped: true };
 
   const now = opts.now ?? new Date();
@@ -139,7 +147,7 @@ export async function seedDemo(
       const created = bakuDay(-u.since, 9 + rand() * 12);
       const [row] = await tx
         .insert(users)
-        .values({ email: demoEmail(u.slug), passwordHash, displayName: u.display, bio: u.bio, city: u.city, createdAt: created })
+        .values({ email: demoEmail(u.slug), passwordHash, displayName: u.display, bio: `${u.bio} · ${DEMO_BIO_MARK}`, city: u.city, createdAt: created })
         .returning({ id: users.id });
       U.set(u.slug, { id: row.id, name: u.display, created });
       counts.users++;
@@ -442,7 +450,7 @@ export async function seedDemo(
         .values({
           organizerId: uid(e.organizer).id,
           title: e.title,
-          description: e.description,
+          description: past ? e.description : `${e.description} ${DEMO_EVENT_MARK}`,
           startsAt,
           endsAt,
           spotId,
@@ -495,9 +503,14 @@ export async function seedDemo(
         counts.messages++;
       }
       let last = people[people.length - 1].at;
+      let prev = new Date(0);
       for (const l of e.lines ?? []) {
-        if (!people.some((p) => p.slug === l[0])) throw new Error(`demo data: ${l[0]} is not in "${e.title}"`);
-        const at = lineAt(l);
+        const sender = people.find((p) => p.slug === l[0]);
+        if (!sender) throw new Error(`demo data: ${l[0]} is not in "${e.title}"`);
+        // never before the sender joined (or before the previous line), never in the future
+        const earliest = Math.max(sender.at.getTime() + 5 * 60 * 1000, prev.getTime() + 60 * 1000);
+        const at = cap(new Date(Math.max(lineAt(l).getTime(), earliest)));
+        prev = at;
         await tx.insert(messages).values({ conversationId: conv.id, senderId: uid(l[0]).id, text: l[1], createdAt: at });
         counts.messages++;
         if (at > last) last = at;
@@ -569,6 +582,14 @@ export async function removeDemo(db: Db): Promise<{ users: number }> {
         order by cm.joined_at, cm.user_id limit 1)
       where c.type = 'group' and c.admin_id in ${demoIds}`);
 
+    // groups with demo members: may end up empty once the demo accounts are gone
+    const demoGroups = (
+      await tx.execute<{ id: string }>(sql`
+        select distinct cm.conversation_id as id from conversation_members cm
+        join conversations c on c.id = cm.conversation_id
+        where c.type = 'group' and cm.user_id in ${demoIds}`)
+    ).rows.map((r) => r.id);
+
     // system messages in real chats that name a demo user
     await tx.execute(sql`
       delete from messages where type = 'system' and (
@@ -579,10 +600,12 @@ export async function removeDemo(db: Db): Promise<{ users: number }> {
     // organize (with participants and chats), messages, memberships, friendships, requests, tokens, blocks
     await tx.execute(sql`delete from users where id in ${demoIds}`);
 
-    // groups left with nobody in them
-    await tx.execute(sql`
-      delete from conversations c where c.type = 'group'
-        and not exists (select 1 from conversation_members cm where cm.conversation_id = c.id)`);
+    // those groups, if nobody is left in them (other empty groups are not ours to touch)
+    for (const id of demoGroups) {
+      await tx.execute(sql`
+        delete from conversations c where c.id = ${id} and c.type = 'group'
+          and not exists (select 1 from conversation_members cm where cm.conversation_id = c.id)`);
+    }
 
     for (const eventId of affected) await promoteWaitlist(tx, eventId);
     return { users: ids.length };
@@ -638,8 +661,8 @@ export async function demoFromEnv(db: Db, env: NodeJS.ProcessEnv, log: (line: st
       log(`demo remove: deleted ${r.users} demo users and everything they owned`);
       return 'removed';
     }
-    if (!env.DEMO_PASSWORD || env.DEMO_PASSWORD.length < 8) {
-      log('demo seed: DEMO_PASSWORD (at least 8 characters) is not set - skipped');
+    if (!env.DEMO_PASSWORD || env.DEMO_PASSWORD.length < DEMO_PASSWORD_MIN) {
+      log(`demo seed: skipped - DEMO_PASSWORD is ${env.DEMO_PASSWORD ? 'too short' : 'not set'} (needs at least ${DEMO_PASSWORD_MIN} characters)`);
       return 'error';
     }
     const r = await seedDemo(db, { password: env.DEMO_PASSWORD });

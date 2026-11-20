@@ -9,6 +9,7 @@ import type { Db } from '../db/index.js';
 import { makeLimiter } from '../lib/limits.js';
 import { privateUser } from '../lib/users.js';
 import { loadMe } from './profile.js';
+import { DEMO_EMAIL_DOMAIN } from '../demo/data.js';
 
 // OWASP-recommended argon2id settings (19 MiB, 2 iterations, 1 lane).
 export const ARGON2_OPTS = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
@@ -61,7 +62,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/register', perIp(limits.register), async (req, reply) => {
     const body = parse(registerSchema, req.body);
     // Demo accounts are removed by email domain, so real people can't use it.
-    if (body.email.endsWith('@demo.yolchu.az')) throw badRequest('This email domain is reserved');
+    if (body.email.endsWith(`@${DEMO_EMAIL_DOMAIN}`)) throw badRequest('This email domain is reserved');
     const passwordHash = await argon2.hash(body.password, ARGON2_OPTS);
     const inserted = await db
       .insert(users)

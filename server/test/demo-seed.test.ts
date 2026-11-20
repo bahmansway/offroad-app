@@ -52,6 +52,7 @@ describe('demo seed', () => {
 
   it('refuses without a password', async () => {
     await expect(seedDemo(app.db, { password: '' })).rejects.toThrow(/DEMO_PASSWORD/);
+    await expect(seedDemo(app.db, { password: 'only-15-chars!!' })).rejects.toThrow(/16 characters/);
     expect(await num(`select count(*) from users where ${DEMO}`)).toBe(0);
   });
 
@@ -75,6 +76,15 @@ describe('demo seed', () => {
     // nobody rated their own car; spots are old enough for points
     expect(await num('select count(*) from car_ratings r join cars c on c.id = r.car_id where c.owner_id = r.user_id')).toBe(0);
     expect(await num(`select count(*) from spots where owner_id <> $1 and created_at > now() - interval '24 hours'`, [real.user.id])).toBe(0);
+    // demo marking: every demo bio, every upcoming demo event; past events unchanged
+    expect(await num(`select count(*) from users where ${DEMO} and bio not like '%Demo hesab'`)).toBe(0);
+    expect(await num(`select count(*) from events where starts_at > now() and description not like '%— Demo tədbir, real deyil.'`)).toBe(0);
+    expect(await num(`select count(*) from events where starts_at < now() and description like '%Demo tədbir%'`)).toBe(0);
+    // event chat lines never come before their sender joined
+    expect(await num(`select count(*) from messages m join conversations c on c.id = m.conversation_id
+      join event_participants p on p.event_id = c.event_id and p.user_id = m.sender_id
+      where m.type = 'user' and m.created_at < p.joined_at`)).toBe(0);
+    expect(await num(`select count(*) from messages where created_at > now()`)).toBe(0);
     // demo accounts log in with the demo password (same argon2 hashing as sign-up)
     await login(demoEmail('reshad.mammadov'));
   });
@@ -169,8 +179,11 @@ describe('demo seed', () => {
   });
 
   it('removeDemo removes only demo data', async () => {
+    // an unrelated empty group (no demo members ever) must not be touched
+    await sql.query(`insert into conversations (type, name) values ('group', 'Not demo')`);
     const r = await removeDemo(app.db);
     expect(r.users).toBe(33);
+    expect(await num(`select count(*) from conversations where name = 'Not demo'`)).toBe(1);
     expect(await num(`select count(*) from users where ${DEMO}`)).toBe(0);
     expect(await num('select count(*) from users')).toBe(2);
     // real data intact
@@ -192,7 +205,8 @@ describe('demo seed', () => {
     expect(await num('select count(*) from clans')).toBe(0);
     expect(await num('select count(*) from clan_members')).toBe(0);
     expect(await num(`select count(*) from conversations where type in ('dm', 'clan')`)).toBe(0);
-    expect(await num(`select count(*) from conversations where type = 'group'`)).toBe(1);
+    expect(await num(`select count(*) from conversations where type = 'group'`)).toBe(2); // mixed + 'Not demo'
+    expect(await num(`select count(*) from conversations where name in ('Şahdağ komandası', 'Qadın sürücülər 4x4')`)).toBe(0);
     expect(await num('select count(*) from events')).toBe(1);
     expect(await num('select count(*) from images')).toBe(0);
     expect(await num('select count(*) from reports')).toBe(0);
@@ -209,14 +223,16 @@ describe('demo seed', () => {
     const log = (l: string) => lines.push(l);
     expect(await demoFromEnv(app.db, {}, log)).toBe('none');
     expect(await demoFromEnv(app.db, { DEMO_SEED: '1' }, log)).toBe('error');
+    expect(await demoFromEnv(app.db, { DEMO_SEED: '1', DEMO_PASSWORD: 'short-password' }, log)).toBe('error');
     expect(await demoFromEnv(app.db, { DEMO_SEED: '1', DEMO_REMOVE: '1', DEMO_PASSWORD: PASSWORD }, log)).toBe('error');
     expect(await num(`select count(*) from users where ${DEMO}`)).toBe(0);
     expect(await demoFromEnv(app.db, { DEMO_SEED: '1', DEMO_PASSWORD: PASSWORD }, log)).toBe('seeded');
     expect(await demoFromEnv(app.db, { DEMO_SEED: '1', DEMO_PASSWORD: PASSWORD }, log)).toBe('skipped');
     expect(await demoFromEnv(app.db, { DEMO_REMOVE: '1' }, log)).toBe('removed');
     expect(await num(`select count(*) from users where ${DEMO}`)).toBe(0);
-    expect(lines.length).toBe(5); // 'none' logs nothing
+    expect(lines.length).toBe(6); // 'none' logs nothing
     expect(lines.some((l) => l.includes(PASSWORD))).toBe(false);
-    expect(lines[2]).toMatch(/^demo seed: 33 users, 45 cars/);
+    expect(lines[1]).toMatch(/too short.*16 characters/);
+    expect(lines[3]).toMatch(/^demo seed: 33 users, 45 cars/);
   });
 });
