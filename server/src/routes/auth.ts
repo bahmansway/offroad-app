@@ -3,7 +3,7 @@ import { z } from 'zod';
 import argon2 from 'argon2';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { users, refreshTokens } from '../db/schema.js';
-import { conflict, parse, unauthorized } from '../lib/errors.js';
+import { badRequest, conflict, parse, unauthorized } from '../lib/errors.js';
 import { hashToken, newRefreshToken, REFRESH_TOKEN_TTL_MS } from '../lib/tokens.js';
 import type { Db } from '../db/index.js';
 import { makeLimiter } from '../lib/limits.js';
@@ -11,7 +11,7 @@ import { privateUser } from '../lib/users.js';
 import { loadMe } from './profile.js';
 
 // OWASP-recommended argon2id settings (19 MiB, 2 iterations, 1 lane).
-const ARGON2_OPTS = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
+export const ARGON2_OPTS = { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 } as const;
 
 const email = z.string().trim().toLowerCase().max(254).pipe(z.email());
 
@@ -60,6 +60,8 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/auth/register', perIp(limits.register), async (req, reply) => {
     const body = parse(registerSchema, req.body);
+    // Demo accounts are removed by email domain, so real people can't use it.
+    if (body.email.endsWith('@demo.yolchu.az')) throw badRequest('This email domain is reserved');
     const passwordHash = await argon2.hash(body.password, ARGON2_OPTS);
     const inserted = await db
       .insert(users)
