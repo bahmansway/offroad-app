@@ -10,8 +10,9 @@ export async function getPermission(): Promise<PermissionStatus | null> { return
 export async function requestPermission(): Promise<PermissionStatus | null> { return null; }
 export async function setupChannels(_names: { messages: string; events: string }) {}
 export function setForegroundHandler(_fn: (title: string, body: string, data: NotificationData) => void) { return () => {}; }
-export function onTap(_fn: (data: NotificationData) => void) { return () => {}; }
-export function takeLaunchTap(): NotificationData { return null; }
+export interface Tap { id: string; data: NotificationData }
+export function onTap(_fn: (tap: Tap) => void) { return () => {}; }
+export function takeLaunchTap(): Tap | null { return null; }
 export async function getPushToken(): Promise<string | null> { return null; }
 export const pushPlatform = 'android' as 'ios' | 'android';
 export async function setBadge(_n: number) {}

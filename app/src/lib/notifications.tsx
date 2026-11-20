@@ -2,13 +2,13 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, Linking, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { api } from './api';
-import { onBeforeLogout, useAuth } from './auth';
+import { onBeforeLogout, setLogoutPushTokenSource, useAuth } from './auth';
 import { useChat } from './chat';
 import { useI18n } from './i18n';
 import { loadSetting, saveSetting } from './settingsStore';
 import * as native from './notifyNative';
 import {
-  foregroundAction, planReminderSync, plannedReminders, routeForNotification, shouldShowPrePrompt,
+  collectPages, createTapDeduper, foregroundAction, planReminderSync, plannedReminders, routeForNotification, shouldShowPrePrompt,
   type NotificationData, type ReminderWords,
 } from './notificationLogic';
 import type { EventSummary, NotificationSettings } from './types';
@@ -92,12 +92,14 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }, []);
 
   // ---- open a screen from a tapped notification ----
-  const go = useCallback((data: NotificationData) => {
-    const route = routeForNotification(data);
+  const firstTap = useRef(createTapDeduper()).current;
+  const go = useCallback((tap: native.Tap) => {
+    if (!firstTap(tap.id)) return; // the launch tap can also arrive through the listener
+    const route = routeForNotification(tap.data);
     if (!route) return;
     if (!userRef.current) { pendingTap.current = route; return; } // after login / session check
     router.push(route as never);
-  }, []);
+  }, [firstTap]);
 
   useEffect(() => {
     if (!native.supported) return;
@@ -108,12 +110,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       setBanner({ key: bannerKey.current, title, body, route: routeForNotification(data) });
     });
     const first = native.takeLaunchTap();
-    if (first) {
-      const r = routeForNotification(first);
+    if (first && firstTap(first.id)) {
+      const r = routeForNotification(first.data);
       if (r) pendingTap.current = r;
     }
     return () => { offTap(); offHandler(); };
-  }, [go, openChatId]);
+  }, [go, openChatId, firstTap]);
 
   useEffect(() => {
     if (loading || !userId || !pendingTap.current) return;
@@ -249,13 +251,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     let events: EventSummary[] = [];
     if (remindersOn()) {
       // fetch first: a network error must not wipe the scheduled reminders
-      let cursor: string | null = null;
-      for (let page = 0; page < 4; page++) {
-        const r: { items: EventSummary[]; nextCursor: string | null } = await api.events({ scope: 'mine', limit: 50, cursor });
-        events = events.concat(r.items);
-        cursor = r.nextCursor;
-        if (!cursor) break;
-      }
+      // every page of "mine" (organizer / going / waitlist, not finished)
+      events = await collectPages((cursor) => api.events({ scope: 'mine', limit: 50, cursor }));
     }
     if (forUser !== userRef.current) return;
     const planned = plannedReminders(events, { now: Date.now(), enabled: remindersOn(), words: words() });
@@ -290,16 +287,17 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   // ---- logout: forget this phone on the server, drop this user's reminders and badge ----
   useEffect(() => {
     if (!native.supported) return;
-    return onBeforeLogout(async () => {
-      const token = tokenRef.current ?? (await loadSetting(TOKEN_KEY));
+    // logout sends this token with the refresh token (POST /auth/logout), also after a lost session
+    setLogoutPushTokenSource(async () => tokenRef.current ?? ((await loadSetting(TOKEN_KEY)) || null));
+    const off = onBeforeLogout(async () => {
       await Promise.all([
-        token ? api.unregisterPushToken(token).catch(() => {}) : Promise.resolve(),
         enqueue(async () => apply(planReminderSync([], await native.listReminders()))),
         native.setBadge(0),
       ]);
       tokenRef.current = null;
       saveSetting(TOKEN_KEY, '');
     });
+    return () => { off(); setLogoutPushTokenSource(null); };
   }, [enqueue]);
 
   // ---- iOS app badge follows the tab badges while the app is open ----

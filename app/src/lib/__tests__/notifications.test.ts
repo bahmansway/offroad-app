@@ -1,5 +1,5 @@
 import {
-  foregroundAction, isExpoGo, isReminderId, planReminderSync, plannedReminders, reminderEventId, reminderId,
+  collectPages, createTapDeduper, foregroundAction, isExpoGo, isReminderId, planReminderSync, plannedReminders, reminderEventId, reminderId,
   routeForNotification, shouldShowPrePrompt, wantsReminders, type ReminderWords, type ScheduledReminder,
 } from '../notificationLogic';
 import { translate } from '../i18n';
@@ -186,5 +186,27 @@ describe('notification strings exist in both languages', () => {
     expect(translate('az', 'calendar.add')).toBe('Təqvimə əlavə et');
     expect(translate('az', 'calendar.update')).toBe('Təqvimi yenilə');
     expect(translate('az', 'notifications.reminders')).toBe('Tədbir xatırlatmaları');
+  });
+});
+
+describe('taps and paging (review fixes)', () => {
+  it('the launch tap is opened once even if the listener also gets it', () => {
+    const first = createTapDeduper(3);
+    expect(first('n1|1')).toBe(true);
+    expect(first('n1|1')).toBe(false);
+    expect(first('n2|2')).toBe(true);
+    expect(first(null)).toBe(true);
+    for (const id of ['a', 'b', 'c']) first(id);
+    expect(first('n1|1')).toBe(true); // forgotten after `max` newer ones
+  });
+  it('collects every page of my events (no 200 cap) and never loops', async () => {
+    const pages: Record<string, { items: number[]; nextCursor: string | null }> = {};
+    for (let i = 0; i < 10; i++) pages[i === 0 ? 'start' : `c${i}`] = { items: Array.from({ length: 50 }, (_, k) => i * 50 + k), nextCursor: i < 9 ? `c${i + 1}` : null };
+    const seen: (string | null)[] = [];
+    const all = await collectPages(async (c) => { seen.push(c); return pages[c ?? 'start']; });
+    expect(all).toHaveLength(500);
+    expect(seen[0]).toBeNull();
+    const loop = await collectPages(async () => ({ items: [1], nextCursor: 'same' }));
+    expect(loop).toEqual([1, 1]);
   });
 });

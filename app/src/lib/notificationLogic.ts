@@ -157,3 +157,39 @@ export function planReminderSync(
   }
   return { cancel, schedule };
 }
+
+// ---------- taps ----------
+
+/**
+ * The notification that started the app can also reach the tap listener: open it only once.
+ * Returns a checker that says true the first time it sees an id (remembers the last `max`).
+ */
+export function createTapDeduper(max = 20) {
+  const seen: string[] = [];
+  return (id: string | null | undefined): boolean => {
+    if (!id) return true; // no id: can't tell, let it through
+    if (seen.includes(id)) return false;
+    seen.push(id);
+    if (seen.length > max) seen.shift();
+    return true;
+  };
+}
+
+// ---------- paging ----------
+
+/**
+ * All items of a cursor-paged list (my events for the reminder sync). Stops when there is no next
+ * cursor, or the server repeats a cursor (never loops forever).
+ */
+export async function collectPages<T>(fetchPage: (cursor: string | null) => Promise<{ items: T[]; nextCursor: string | null }>): Promise<T[]> {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  for (;;) {
+    const r = await fetchPage(cursor);
+    out.push(...r.items);
+    if (!r.nextCursor || seen.has(r.nextCursor)) return out;
+    seen.add(r.nextCursor);
+    cursor = r.nextCursor;
+  }
+}

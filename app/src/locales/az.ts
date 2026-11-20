@@ -1016,6 +1016,10 @@ const az: Dict = {
     bannerHint: 'Açır',
   },
   calendar: {
+    remove: 'Təqvimdən sil',
+    removeConfirm: 'Ləğv edilmiş bu tədbir təqviminizdən silinsin?',
+    removed: 'Təqviminizdən silindi',
+    cancelledHint: 'Tədbir ləğv edildi. Onu təqviminizdən silə bilərsiniz.',
     add: 'Təqvimə əlavə et',
     update: 'Təqvimi yenilə',
     added: 'Təqviminizə əlavə edildi',

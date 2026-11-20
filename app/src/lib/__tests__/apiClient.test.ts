@@ -88,6 +88,8 @@ describe('createApiClient', () => {
     await expect(client.request('/api/me')).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
     expect(store.value).toBeNull();
     expect(onAuthLost).toHaveBeenCalledTimes(1);
+    // v5: the rejected refresh token is handed over (to remove this phone's push token for that account)
+    expect(onAuthLost).toHaveBeenCalledWith('bad');
   });
 
   it('keeps the session when refresh fails with a server error', async () => {

@@ -2,7 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { notificationSettings, pushTokens } from '../db/schema.js';
 import type { Db } from '../db/index.js';
 import type { AppConfig } from '../config.js';
-import { appBadge } from './badges.js';
+import { appBadges } from './badges.js';
 
 /**
  * Phone notifications through the Expo push service (free; https://docs.expo.dev/push-notifications/sending-notifications/).
@@ -27,8 +27,10 @@ export interface Notice {
   text: (locale: PushLocale) => { title: string; body: string };
   /** Sent to the app as `notification.request.content.data` (tap routing). */
   data: Record<string, string>;
-  /** Chats: at most one notification per recipient per key within the coalesce window. */
+  /** At most one notification per recipient per key within the coalesce window. */
   coalesceKey?: string;
+  /** Window for this key (ms); default = the chat window (30 s). */
+  coalesceMs?: number;
 }
 
 interface Log {
@@ -64,7 +66,7 @@ export function createPush(o: PushOptions) {
   const { db, config, log } = o;
   const pending = new Set<Promise<void>>();
   /** "userId|key" -> when the last chat notification went out */
-  const lastSent = new Map<string, number>();
+  const lastSent = new Map<string, { at: number; window: number }>();
   /** ticket id -> token + when it was queued */
   const receipts = new Map<string, { token: string; at: number }>();
   let receiptTimer: ReturnType<typeof setTimeout> | null = null;
@@ -102,16 +104,16 @@ export function createPush(o: PushOptions) {
   }
 
   /** Synchronous check-and-mark, so two messages at the same moment can't both pass. */
-  function coalesce(ids: string[], key: string) {
+  function coalesce(ids: string[], key: string, windowMs: number) {
     const now = Date.now();
     if (lastSent.size > 10_000) {
-      for (const [k, t] of lastSent) if (now - t >= config.coalesceMs) lastSent.delete(k);
+      for (const [k, v] of lastSent) if (now - v.at >= v.window) lastSent.delete(k);
     }
     return ids.filter((id) => {
       const k = `${id}|${key}`;
-      const t = lastSent.get(k);
-      if (t !== undefined && now - t < config.coalesceMs) return false;
-      lastSent.set(k, now);
+      const v = lastSent.get(k);
+      if (v !== undefined && now - v.at < windowMs) return false;
+      lastSent.set(k, { at: now, window: windowMs });
       return true;
     });
   }
@@ -169,17 +171,15 @@ export function createPush(o: PushOptions) {
   async function send(userIds: string[], n: Notice) {
     let ids = [...new Set(userIds.filter(Boolean))];
     ids = await allowed(ids, n.category);
-    if (n.coalesceKey) ids = coalesce(ids, n.coalesceKey);
+    if (n.coalesceKey) ids = coalesce(ids, n.coalesceKey, n.coalesceMs ?? config.coalesceMs);
     if (!ids.length) return;
     const tokens = await db
       .select({ userId: pushTokens.userId, token: pushTokens.token, platform: pushTokens.platform, locale: pushTokens.locale })
       .from(pushTokens)
       .where(inArray(pushTokens.userId, ids));
     if (!tokens.length) return;
-    const badges = new Map<string, number | undefined>();
-    for (const u of new Set(tokens.map((t) => t.userId))) {
-      badges.set(u, await appBadge(db, u).catch(() => undefined));
-    }
+    // one query for every recipient's app icon number
+    const badges = await appBadges(db, tokens.map((t) => t.userId)).catch(() => new Map<string, number>());
     const texts = new Map<PushLocale, { title: string; body: string }>();
     const textFor = (l: PushLocale) => {
       let v = texts.get(l);

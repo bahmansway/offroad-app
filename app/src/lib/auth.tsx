@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, Platform } from 'react-native';
 import { api, client, onAuthLost } from './api';
 import { sessionStateAfterMeError } from './sessionCheck';
+import { rememberRemoval, removalDone, retryRemovals } from './pushCleanup';
 import type { User } from './types';
 
 interface AuthValue {
@@ -24,6 +25,27 @@ interface AuthValue {
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
+
+/** v5: where logout finds this phone's push token (set by the notifications provider). */
+let pushTokenSource: (() => Promise<string | null>) | null = null;
+export function setLogoutPushTokenSource(fn: (() => Promise<string | null>) | null) {
+  pushTokenSource = fn;
+}
+async function currentPushToken(): Promise<string | null> {
+  try {
+    return (await pushTokenSource?.()) || null;
+  } catch {
+    return null;
+  }
+}
+/** Tell the server to forget this phone for the account of `refreshToken`; keep a note to retry when it can't be reached. */
+async function forgetPhone(refreshToken: string, pushToken: string | null) {
+  try {
+    await api.logout(refreshToken, pushToken);
+  } catch (e) {
+    if (pushToken && !removalDone(e)) await rememberRemoval({ refreshToken, pushToken }).catch(() => {});
+  }
+}
 
 /** v5: work that must run while still logged in, right before logout (e.g. removing this phone's push token). */
 const beforeLogout = new Set<() => Promise<void>>();
@@ -77,12 +99,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     alive.current = true;
-    onAuthLost(() => {
+    onAuthLost((lastRefreshToken) => {
       setUser(null);
       setOffline(false);
       setSessionLost(true);
+      // session lost: this phone must stop getting that account's notifications
+      if (lastRefreshToken) {
+        currentPushToken().then((pushToken) => { if (pushToken) forgetPhone(lastRefreshToken, pushToken); });
+      }
     });
     check();
+    // removals that could not reach the server last time (offline logout, lost session)
+    retryRemovals((rt, pt) => api.logout(rt, pt)).catch(() => {});
     return () => {
       alive.current = false;
       onAuthLost(null);
@@ -123,6 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    const pushToken = await currentPushToken(); // read before the hooks forget it
     await runBeforeLogout();
     let refreshToken: string | undefined;
     try {
@@ -138,13 +167,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
     setOffline(false);
-    if (refreshToken) {
-      try {
-        await api.logout(refreshToken);
-      } catch {
-        /* server unreachable: local logout still counts */
-      }
-    }
+    // server unreachable: local logout still counts; the push token removal is retried on next start
+    if (refreshToken) await forgetPhone(refreshToken, pushToken);
   }, []);
 
   const updateUser = useCallback((patch: Partial<User>) => {

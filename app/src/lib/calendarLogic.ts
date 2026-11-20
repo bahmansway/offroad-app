@@ -61,6 +61,26 @@ export function calendarState(stored: StoredCalendarEntry | null, e: CalendarEve
   return stored.signature === calendarSignature(e) ? 'added' : 'update';
 }
 
+/**
+ * The calendar button on the event page:
+ * - scheduled and not started: 'add' / 'update' / 'added' (web: always 'add', it downloads a file);
+ * - cancelled with an entry in my phone calendar: 'remove' (offer to delete it);
+ * - otherwise null (no button).
+ */
+export type CalendarAction = 'add' | 'update' | 'added' | 'remove';
+export function calendarAction(
+  stored: StoredCalendarEntry | null,
+  e: CalendarEventSource & { status: 'scheduled' | 'cancelled' | 'finished' },
+  o: { mode: 'device' | 'file'; now?: number },
+): CalendarAction | null {
+  if (e.status === 'cancelled') return o.mode === 'device' && stored ? 'remove' : null;
+  if (e.status !== 'scheduled' || Date.parse(e.startsAt) <= (o.now ?? Date.now())) return null;
+  return o.mode === 'device' ? calendarState(stored, e) : 'add';
+}
+
+/** Device storage key of the calendar entry: per account, so another user on the same phone starts fresh. */
+export const calendarKey = (userId: string | null | undefined, eventId: string) => `cal.${userId || 'anon'}.${eventId}`;
+
 export function parseStoredEntry(raw: string | null): StoredCalendarEntry | null {
   if (!raw) return null;
   try {

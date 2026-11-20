@@ -70,17 +70,23 @@ export function setForegroundHandler(onForeground: (title: string, body: string,
 }
 
 /** Taps on notifications (also the one that started the app). */
-export function onTap(fn: (data: NotificationData) => void) {
-  const sub = Notifications.addNotificationResponseReceivedListener((r) => fn(r.notification.request.content.data as NotificationData));
+export interface Tap { id: string; data: NotificationData }
+const toTap = (r: Notifications.NotificationResponse): Tap => ({
+  id: `${r.notification.request.identifier}|${r.notification.date}`,
+  data: r.notification.request.content.data as NotificationData,
+});
+
+export function onTap(fn: (tap: Tap) => void) {
+  const sub = Notifications.addNotificationResponseReceivedListener((r) => fn(toTap(r)));
   return () => sub.remove();
 }
 
-export function takeLaunchTap(): NotificationData {
+export function takeLaunchTap(): Tap | null {
   try {
     const r = Notifications.getLastNotificationResponse();
     if (!r) return null;
     Notifications.clearLastNotificationResponse();
-    return r.notification.request.content.data as NotificationData;
+    return toTap(r);
   } catch {
     return null;
   }

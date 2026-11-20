@@ -1,5 +1,5 @@
 import {
-  buildIcs, calendarDetails, calendarSignature, calendarState, eventLink, icsDate, icsEscape, icsFileName, icsFold, parseStoredEntry,
+  calendarAction, calendarKey, buildIcs, calendarDetails, calendarSignature, calendarState, eventLink, icsDate, icsEscape, icsFileName, icsFold, parseStoredEntry,
   DEFAULT_LENGTH_MS, type CalendarEventSource,
 } from '../calendarLogic';
 
@@ -99,5 +99,29 @@ describe('.ics file', () => {
   it('safe file names', () => {
     expect(icsFileName('Xızı səfəri — Şamaxı!')).toBe('xizi-seferi-samaxi.ics');
     expect(icsFileName('🚙🚙')).toBe('event.ics');
+  });
+});
+
+describe('calendar button (review fixes)', () => {
+  const now = Date.parse('2026-11-20T08:00:00.000Z');
+  const stored = { calendarEventId: 'cal-1', signature: calendarSignature(base) };
+  const ev = (p: object = {}) => ({ ...base, status: 'scheduled' as const, ...p });
+  it('phone: add / added / update while upcoming; remove after cancel only when in my calendar', () => {
+    expect(calendarAction(null, ev(), { mode: 'device', now })).toBe('add');
+    expect(calendarAction(stored, ev(), { mode: 'device', now })).toBe('added');
+    expect(calendarAction(stored, ev({ startsAt: '2026-11-23T05:00:00.000Z' }), { mode: 'device', now })).toBe('update');
+    expect(calendarAction(stored, ev({ status: 'cancelled' }), { mode: 'device', now })).toBe('remove');
+    expect(calendarAction(null, ev({ status: 'cancelled' }), { mode: 'device', now })).toBeNull();
+    expect(calendarAction(stored, ev({ status: 'finished' }), { mode: 'device', now })).toBeNull();
+    expect(calendarAction(null, ev({ startsAt: '2026-11-20T07:00:00.000Z' }), { mode: 'device', now })).toBeNull(); // started
+  });
+  it('web: always a download while upcoming, never remove', () => {
+    expect(calendarAction(stored, ev(), { mode: 'file', now })).toBe('add');
+    expect(calendarAction(stored, ev({ status: 'cancelled' }), { mode: 'file', now })).toBeNull();
+  });
+  it('stored per account', () => {
+    expect(calendarKey('u1', 'e1')).toBe('cal.u1.e1');
+    expect(calendarKey(null, 'e1')).toBe('cal.anon.e1');
+    expect(calendarKey('u1', 'e1')).not.toBe(calendarKey('u2', 'e1'));
   });
 });

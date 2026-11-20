@@ -22,8 +22,9 @@ export interface ApiClientOptions {
   lock?: LockFn;
   /** Request timeout in ms (default 15 s). */
   timeoutMs?: number;
-  /** Called when the refresh token is rejected — the user must log in again. */
-  onAuthLost?: () => void;
+  /** Called when the refresh token is rejected — the user must log in again. Gets the rejected refresh
+   *  token when known (v5: used once more to remove this phone's push token for that account). */
+  onAuthLost?: (lastRefreshToken?: string) => void;
 }
 
 export interface RequestOptions {
@@ -144,7 +145,7 @@ export function createApiClient(opts: ApiClientOptions) {
       if (!stored?.refreshToken) {
         cached = null;
         // We had a session but the shared store is empty → another tab logged out.
-        if (held) opts.onAuthLost?.();
+        if (held) opts.onAuthLost?.(held.refreshToken);
         return null;
       }
       const someoneElseRotated =
@@ -165,7 +166,7 @@ export function createApiClient(opts: ApiClientOptions) {
         // Only a definite rejection logs the user out; 429 / 5xx keep the session for later.
         if (res.status === 400 || res.status === 401 || res.status === 403) {
           await setTokens(null);
-          opts.onAuthLost?.();
+          opts.onAuthLost?.(stored.refreshToken);
         }
         return null;
       }

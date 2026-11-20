@@ -1014,6 +1014,10 @@ const en = {
     bannerHint: 'Opens it',
   },
   calendar: {
+    remove: 'Remove from calendar',
+    removeConfirm: 'Remove this cancelled event from your calendar?',
+    removed: 'Removed from your calendar',
+    cancelledHint: 'The event was cancelled. You can remove it from your calendar.',
     add: 'Add to calendar',
     update: 'Update calendar',
     added: 'Added to your calendar',

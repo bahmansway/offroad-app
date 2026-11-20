@@ -1,4 +1,5 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
+import { chatClosedSql } from './eventState.js';
 import { clanInvites } from '../db/schema.js';
 import type { Db } from '../db/index.js';
 import { incomingRequestCount } from './friends.js';
@@ -17,8 +18,35 @@ export async function badgeCounts(db: Db, me: string) {
   };
 }
 
-/** The number on the iOS app icon: the same three counts added up. */
-export async function appBadge(db: Db, me: string) {
-  const b = await badgeCounts(db, me);
-  return b.messages + b.friendRequests + b.clanInvites;
+/**
+ * App icon numbers for many users in ONE query (push sending). Same rules as `badgeCounts`:
+ * unread (not muted, not deleted, not my own, sender not blocked by me, event chat not closed)
+ * + incoming friend requests (no block either way) + pending, unexpired clan invites.
+ */
+export async function appBadges(db: Db, userIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ids = [...new Set(userIds)];
+  if (!ids.length) return out;
+  const list = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
+  const r = await db.execute<{ user_id: string; n: number }>(sql`
+    with u(id) as (select unnest(array[${list}]))
+    select u.id as user_id, (
+      (select count(*) from messages m
+         join conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = u.id
+         join conversations c on c.id = m.conversation_id
+         left join events on events.id = c.event_id
+        where cm.muted_at is null
+          and m.deleted_at is null
+          and (m.sender_id is null or m.sender_id <> u.id)
+          and (m.sender_id is null or m.sender_id not in (select blocked_id from blocks where blocker_id = u.id))
+          and m.created_at > cm.last_read_at
+          and (c.type <> 'event' or not (${chatClosedSql('events')})))
+      + (select count(*) from friend_requests fr
+          where fr.to_id = u.id and fr.declined_at is null
+            and not exists (select 1 from blocks b where (b.blocker_id = u.id and b.blocked_id = fr.from_id) or (b.blocker_id = fr.from_id and b.blocked_id = u.id)))
+      + (select count(*) from clan_invites ci where ci.user_id = u.id and ci.declined_at is null and ci.expires_at > now())
+    )::int as n
+    from u`);
+  for (const row of r.rows) out.set(row.user_id, Number(row.n));
+  return out;
 }

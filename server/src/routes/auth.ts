@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import argon2 from 'argon2';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { users, refreshTokens } from '../db/schema.js';
+import { users, refreshTokens, pushTokens } from '../db/schema.js';
+import { PUSH_TOKEN_RE } from '../lib/push.js';
 import { badRequest, conflict, parse, unauthorized } from '../lib/errors.js';
 import { hashToken, newRefreshToken, REFRESH_TOKEN_TTL_MS } from '../lib/tokens.js';
 import type { Db } from '../db/index.js';
@@ -30,6 +31,10 @@ const loginSchema = z
   })
   .strict();
 const refreshSchema = z.object({ refreshToken: z.string().min(10).max(200) }).strict();
+/** v5: optional `pushToken` = this phone's Expo push token, removed for the logged-out user. */
+const logoutSchema = z
+  .object({ refreshToken: z.string().min(10).max(200), pushToken: z.string().trim().max(255).regex(PUSH_TOKEN_RE).optional() })
+  .strict();
 
 export { privateUser };
 
@@ -126,11 +131,18 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/logout', async (req, reply) => {
-    const { refreshToken } = parse(refreshSchema, req.body);
+    const { refreshToken, pushToken } = parse(logoutSchema, req.body);
+    const hash = hashToken(refreshToken);
     await db
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
-      .where(and(eq(refreshTokens.tokenHash, hashToken(refreshToken)), isNull(refreshTokens.revokedAt)));
+      .where(and(eq(refreshTokens.tokenHash, hash), isNull(refreshTokens.revokedAt)));
+    if (pushToken) {
+      // v5: forget this phone for the user the refresh token belongs to. This also works for a refresh
+      // token that is already revoked or expired (session lost, logout retried after being offline).
+      const [owner] = await db.select({ userId: refreshTokens.userId }).from(refreshTokens).where(eq(refreshTokens.tokenHash, hash)).limit(1);
+      if (owner) await db.delete(pushTokens).where(and(eq(pushTokens.token, pushToken), eq(pushTokens.userId, owner.userId)));
+    }
     return reply.status(204).send();
   });
 }

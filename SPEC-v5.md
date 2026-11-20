@@ -49,6 +49,9 @@ Only the details and additions beyond the spec above. All v2–v4 notes still ap
   - At most 10 phones per user: the least recently seen are dropped. Limit 60 calls per hour (429).
 - `DELETE /api/me/push-tokens {token}` returns 204. Only removes the token if it is yours (otherwise still 204). Needs login, so call it before clearing the session on logout.
 
+- `POST /api/auth/logout {refreshToken, pushToken?}` (review fix): with `pushToken` the server also deletes that token for the user who owns the refresh token. This works even when the refresh token is already revoked or expired, so the app can send it after a lost session or retry an offline logout on the next start. A bad `pushToken` format gives 400; another user's token is never touched. Still 204.
+  - The app sends it on every logout. On a lost session or a failed logout it keeps a note on the phone and retries on the next app start.
+
 **Settings**
 - `GET /api/me/notification-settings` returns `{messages, friends, clans, events}` (all `true` until changed).
 - `PATCH` the same path with any of the four booleans; returns all four. Strict body (unknown key or non-boolean 400). `{}` is fine and changes nothing.
@@ -68,6 +71,9 @@ Only the details and additions beyond the spec above. All v2–v4 notes still ap
 - Bodies are cut to 120 characters (with "…"), titles to 80.
 - `badge` (iOS app icon) = unread messages + incoming friend requests + clan invites, the same numbers as `GET /api/me/badges`.
 - Coalescing: at most one chat notification per chat per person per 30 s; later messages in the window send no push (the unread count still goes up).
+  - Event time/place edits: at most one per event per person per 10 minutes (`event-edit:<id>`). Cancel and promotion are never held back.
+  - Friend requests: at most one per sender → recipient per hour (send / cancel / send spam). Clan join requests: at most one per clan + requester per hour.
+- Badge numbers for all recipients of one notification come from one grouped query (`appBadges` in `lib/badges.ts`), same rules as `/me/badges`.
 - Settings are applied server-side. The sender never gets their own notification.
 
 **How it is sent**
@@ -82,4 +88,5 @@ Only the details and additions beyond the spec above. All v2–v4 notes still ap
 
 **App side (for reference)**
 - Remote push registration is skipped in Expo Go (`Constants.executionEnvironment === 'storeClient'` or `appOwnership === 'expo'`) and on simulators. Reminders (local notifications) and add-to-calendar (`expo-calendar/legacy`, because the new object API is not in Expo Go yet) work in Expo Go.
+- Phone calendar entries are remembered per account (`cal.<userId>.<eventId>`); when an event is cancelled and it is in my phone calendar, the event page offers "Təqvimdən sil". Taps are de-duplicated by notification id (launch tap vs. listener). The reminder sync pages through all of my events.
 - Local reminder ids are `yolchu-reminder:<eventId>:24h|2h`; the app re-syncs them on app start / foreground, on `event:updated`, after the event page loads, and when settings or language change.

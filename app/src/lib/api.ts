@@ -10,8 +10,8 @@ import type {
 } from './types';
 import { toArray } from './catalog';
 
-let authLostHandler: (() => void) | null = null;
-export function onAuthLost(fn: (() => void) | null) {
+let authLostHandler: ((lastRefreshToken?: string) => void) | null = null;
+export function onAuthLost(fn: ((lastRefreshToken?: string) => void) | null) {
   authLostHandler = fn;
 }
 
@@ -19,7 +19,7 @@ export const client = createApiClient({
   baseUrl: API_URL,
   store: tokenStore,
   lock: withLock,
-  onAuthLost: () => authLostHandler?.(),
+  onAuthLost: (rt) => authLostHandler?.(rt),
 });
 
 const r = client.request;
@@ -31,8 +31,8 @@ export const api = {
     r<AuthResponse>('/api/auth/register', { method: 'POST', body: b, auth: false }),
   login: (b: { email: string; password: string }) =>
     r<AuthResponse>('/api/auth/login', { method: 'POST', body: b, auth: false }),
-  logout: (refreshToken: string) =>
-    r<void>('/api/auth/logout', { method: 'POST', body: { refreshToken }, auth: false }),
+  logout: (refreshToken: string, pushToken?: string | null) =>
+    r<void>('/api/auth/logout', { method: 'POST', body: pushToken ? { refreshToken, pushToken } : { refreshToken }, auth: false }),
   me: () => r<User>('/api/me'),
   updateMe: (b: MeInput) => r<User>('/api/me', { method: 'PATCH', body: b }),
   uploadAvatar: (data: Uint8Array, contentType = 'image/jpeg') =>

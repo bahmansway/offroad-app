@@ -28,8 +28,8 @@ import {
 } from '../../lib/eventLogic';
 import type { CarSummary, EventDetail, EventParticipant, Id, Spot } from '../../lib/types';
 import { useNotifications } from '../../lib/notifications';
-import { addToCalendar, calendarMode, storedCalendarEntry } from '../../lib/calendar';
-import { calendarState, type StoredCalendarEntry } from '../../lib/calendarLogic';
+import { addToCalendar, calendarMode, removeFromCalendar, storedCalendarEntry } from '../../lib/calendar';
+import { calendarAction, type StoredCalendarEntry } from '../../lib/calendarLogic';
 import { API_URL } from '../../lib/config';
 
 const NO_SPOTS: Spot[] = [];
@@ -76,11 +76,15 @@ export default function EventScreen() {
     }
   }, [id, notifications.syncEventReminders]);
 
+  // the phone calendar entry is remembered per account (another user on this phone starts fresh)
+  const calUser = user?.id ?? null;
   useEffect(() => {
     let alive = true;
-    storedCalendarEntry(String(id)).then((v) => { if (alive) setCalEntry(v); });
+    setCalEntry(null);
+    setCalNote(null);
+    storedCalendarEntry(calUser, String(id)).then((v) => { if (alive) setCalEntry(v); });
     return () => { alive = false; };
-  }, [id]);
+  }, [id, calUser]);
 
   // A different account (or logged out) must not see the previous user's event state, cars or chat link.
   const userId = user?.id ?? null;
@@ -159,14 +163,24 @@ export default function EventScreen() {
 
   async function calendar() {
     if (!ev) return;
+    const forUser = calUser;
     setBusy('calendar');
     setCalNote(null);
-    const r = await addToCalendar(ev, { appUrl: API_URL, meetingPointWord: t('events.meetingPoint') });
+    const removing = ev.status === 'cancelled';
+    if (removing && !(await confirmAsync(t('calendar.removeConfirm'), t('calendar.remove'), t('common.cancel'), { destructive: true }))) {
+      setBusy(null);
+      return;
+    }
+    const r = removing
+      ? await removeFromCalendar(forUser, String(ev.id))
+      : await addToCalendar(forUser, ev, { appUrl: API_URL, meetingPointWord: t('events.meetingPoint') });
     setBusy(null);
+    if (forUser !== userIdRef.current) return; // logged out / switched meanwhile
     if (r.ok) {
       successFeedback();
-      setCalNote({ text: t(r.action === 'downloaded' ? 'calendar.downloaded' : r.action === 'updated' ? 'calendar.updated' : 'calendar.added'), error: false });
-      setCalEntry(await storedCalendarEntry(String(ev.id)));
+      const key = { downloaded: 'calendar.downloaded', updated: 'calendar.updated', added: 'calendar.added', removed: 'calendar.removed' }[r.action];
+      setCalNote({ text: t(key), error: false });
+      setCalEntry(await storedCalendarEntry(forUser, String(ev.id)));
     } else {
       setCalNote({ text: t(`calendar.${r.reason}`), error: true });
     }
@@ -254,20 +268,20 @@ export default function EventScreen() {
   };
 
   // "Add to calendar": phone calendar (remembers the entry, offers an update when time / place changed) or .ics on the web
-  const calState = calendarMode === 'device' ? calendarState(calEntry, ev) : 'add';
-  const showCalendar = ev.status === 'scheduled' && Date.parse(ev.startsAt) > Date.now();
-  const calendarArea = showCalendar ? (
+  const calAction = calendarAction(calEntry, ev, { mode: calendarMode });
+  const calendarArea = calAction ? (
     <View style={{ gap: 6 }}>
       <PillButton
-        title={calState === 'update' ? t('calendar.update') : calState === 'added' ? t('calendar.inCalendar') : t('calendar.add')}
-        icon={calState === 'added' ? 'check' : 'calendarSmall'}
-        variant={calState === 'update' ? 'tinted' : 'gray'}
+        title={t({ add: 'calendar.add', update: 'calendar.update', added: 'calendar.inCalendar', remove: 'calendar.remove' }[calAction])}
+        icon={calAction === 'added' ? 'check' : calAction === 'remove' ? 'trash' : 'calendarSmall'}
+        variant={calAction === 'update' ? 'tinted' : 'gray'}
         size="medium"
         onPress={calendar}
         loading={busy === 'calendar'}
-        disabled={calState === 'added'}
+        disabled={calAction === 'added'}
       />
-      {calState === 'update' && !calNote ? <Txt variant="footnote" tone="label2" center>{t('calendar.changedHint')}</Txt> : null}
+      {!calNote && calAction === 'update' ? <Txt variant="footnote" tone="label2" center>{t('calendar.changedHint')}</Txt> : null}
+      {!calNote && calAction === 'remove' ? <Txt variant="footnote" tone="label2" center>{t('calendar.cancelledHint')}</Txt> : null}
       {calNote ? (
         <Txt variant="footnote" tone={calNote.error ? 'destructive' : 'label2'} center role={calNote.error ? 'alert' : undefined} accessibilityLiveRegion="polite">{calNote.text}</Txt>
       ) : null}

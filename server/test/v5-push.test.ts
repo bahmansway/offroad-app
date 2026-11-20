@@ -11,6 +11,7 @@ import { makeApp, register, resetDb, TEST_DB_URL } from './helpers.js';
 import { MIGRATIONS_DIR } from '../src/db/migrate.js';
 import { createPush, truncate } from '../src/lib/push.js';
 import { bakuShort } from '../src/lib/notify.js';
+import { appBadges, badgeCounts } from '../src/lib/badges.js';
 import { loadConfig } from '../src/config.js';
 
 type U = Awaited<ReturnType<typeof register>>;
@@ -518,5 +519,116 @@ describe('event notifications', () => {
     expect(mock.to(tw)[0]).toMatchObject({ title: 'Xızı trip!', body: 'The event was cancelled: Qar yağır' });
     expect(mock.to(tb)).toHaveLength(0);
     expect(mock.to(tf)).toHaveLength(0);
+  });
+});
+
+// ---------------- review fixes ----------------
+
+describe('logout removes this phone (pushToken)', () => {
+  it('deletes the token for the refresh token owner, also when the session is already gone', async () => {
+    const a = await register(app, 'Out');
+    const b = await register(app, 'Out');
+    const ta = await withToken(a);
+    const tb = await withToken(b);
+    // someone else's token is never touched
+    expect((await req('POST', '/api/auth/logout', undefined, { refreshToken: a.refreshToken, pushToken: tb })).statusCode).toBe(204);
+    expect((await sql.query('select 1 from push_tokens where token = $1', [tb])).rowCount).toBe(1);
+    expect((await sql.query('select 1 from push_tokens where token = $1', [ta])).rowCount).toBe(1);
+    // retried after the refresh token was already revoked (offline logout / session lost): still removed
+    expect((await req('POST', '/api/auth/logout', undefined, { refreshToken: a.refreshToken, pushToken: ta })).statusCode).toBe(204);
+    expect((await sql.query('select 1 from push_tokens where token = $1', [ta])).rowCount).toBe(0);
+    // the refresh token really is revoked
+    expect((await req('POST', '/api/auth/refresh', undefined, { refreshToken: a.refreshToken })).statusCode).toBe(401);
+    // normal logout with the token
+    expect((await req('POST', '/api/auth/logout', undefined, { refreshToken: b.refreshToken, pushToken: tb })).statusCode).toBe(204);
+    expect((await sql.query('select 1 from push_tokens where token = $1', [tb])).rowCount).toBe(0);
+  });
+  it('unknown refresh token removes nothing; bad push token is 400; old body still works', async () => {
+    const a = await register(app, 'Out2');
+    const ta = await withToken(a);
+    expect((await req('POST', '/api/auth/logout', undefined, { refreshToken: 'x'.repeat(40), pushToken: ta })).statusCode).toBe(204);
+    expect((await sql.query('select 1 from push_tokens where token = $1', [ta])).rowCount).toBe(1);
+    expect((await req('POST', '/api/auth/logout', undefined, { refreshToken: a.refreshToken, pushToken: 'nope' })).statusCode).toBe(400);
+    expect((await req('POST', '/api/auth/logout', undefined, { refreshToken: a.refreshToken })).statusCode).toBe(204);
+    expect((await sql.query('select 1 from push_tokens where token = $1', [ta])).rowCount).toBe(1);
+  });
+});
+
+describe('more coalescing', () => {
+  const inDays = (d: number) => new Date(Date.now() + d * 86400000).toISOString();
+  it('event time edits: one notification per event per person per 10 minutes', async () => {
+    const org = await register(app, 'EdOrg');
+    const p = await register(app, 'EdP');
+    const carO = (await req('POST', '/api/cars', org, { make: 'UAZ', model: 'Patriot', year: 2018 })).json().id;
+    const carP = (await req('POST', '/api/cars', p, { make: 'UAZ', model: 'Hunter', year: 2016 })).json().id;
+    const ev = (await req('POST', '/api/events', org, { title: 'Quba', startsAt: inDays(5), meetingPoint: { lat: 41.3, lng: 48.5, label: 'Quba' }, maxCars: 5, carId: carO })).json();
+    await req('POST', `/api/events/${ev.id}/join`, p, { carId: carP });
+    const tp = await withToken(p);
+    await settled();
+    mock.reset();
+    expect((await req('PATCH', `/api/events/${ev.id}`, org, { startsAt: inDays(6) })).statusCode).toBe(200);
+    expect((await req('PATCH', `/api/events/${ev.id}`, org, { startsAt: inDays(7) })).statusCode).toBe(200);
+    expect((await req('PATCH', `/api/events/${ev.id}`, org, { meetingPoint: { lat: 41.4, lng: 48.6, label: 'Qusar' } })).statusCode).toBe(200);
+    await settled();
+    expect(mock.to(tp)).toHaveLength(1);
+    // cancelling is never held back
+    await req('POST', `/api/events/${ev.id}/cancel`, org, {});
+    await settled();
+    expect(mock.to(tp)).toHaveLength(2);
+  });
+
+  it('friend request send / cancel / send notifies once', async () => {
+    const a = await register(app, 'FrSpam');
+    const b = await register(app, 'FrSpam');
+    const tb = await withToken(b);
+    const r1 = await req('POST', '/api/friends/requests', a, { userId: b.user.id });
+    expect((await req('DELETE', `/api/friends/requests/${r1.json().request.id}`, a)).statusCode).toBe(204);
+    expect((await req('POST', '/api/friends/requests', a, { userId: b.user.id })).statusCode).toBe(201);
+    await settled();
+    expect(mock.to(tb).filter((m) => m.data.type === 'friend_request')).toHaveLength(1);
+    // another sender still gets through
+    const c = await register(app, 'FrOther');
+    await req('POST', '/api/friends/requests', c, { userId: b.user.id });
+    await settled();
+    expect(mock.to(tb).filter((m) => m.data.type === 'friend_request')).toHaveLength(2);
+  });
+
+  it('clan join request / cancel / request notifies once', async () => {
+    const lead = await register(app, 'JrLead');
+    const asker = await register(app, 'JrAsk');
+    const clan = (await req('POST', '/api/clans', lead, { name: `Spam Clan ${Date.now()}`, tag: 'SPM', isOpen: false })).json();
+    const tl = await withToken(lead);
+    await req('POST', `/api/clans/${clan.id}/join`, asker);
+    await req('POST', `/api/clans/${clan.id}/leave`, asker);
+    await req('POST', `/api/clans/${clan.id}/join`, asker);
+    await settled();
+    expect(mock.to(tl).filter((m) => m.data.type === 'clan_request')).toHaveLength(1);
+  });
+});
+
+describe('badge numbers in one query', () => {
+  it('match /me/badges for every user', async () => {
+    const a = await register(app, 'BdA');
+    const b = await register(app, 'BdB');
+    const c = await register(app, 'BdC');
+    const dmAB = await dmBetween(a, b);
+    const dmCB = await dmBetween(c, b);
+    await send(a, dmAB, 'one');
+    await send(a, dmAB, 'two');
+    await send(c, dmCB, 'three');
+    await req('PUT', `/api/conversations/${dmCB}/mute`, b); // muted chat does not count
+    await req('POST', '/api/friends/requests', c, { userId: a.user.id });
+    const clan = (await req('POST', '/api/clans', c, { name: `Badge Clan ${Date.now()}`, tag: 'BDG' })).json();
+    await req('POST', `/api/clans/${clan.id}/invites`, c, { userId: b.user.id });
+    await send(b, dmAB, 'reply'); // own message, and a now has 1 unread
+    await req('POST', `/api/users/${a.user.id}/block`, b); // b blocked a: a's messages no longer count for b
+    const ids = [a.user.id, b.user.id, c.user.id];
+    const many = await appBadges(app.db, [...ids, a.user.id]);
+    for (const id of ids) {
+      const one = await badgeCounts(app.db, id);
+      expect(many.get(id), id).toBe(one.messages + one.friendRequests + one.clanInvites);
+    }
+    expect(many.get(b.user.id)).toBe(1); // only the clan invite
+    expect((await appBadges(app.db, [])).size).toBe(0);
   });
 });

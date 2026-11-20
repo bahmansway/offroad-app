@@ -58,6 +58,10 @@ export function bakuShort(d: Date): string {
 
 /** Fields whose change is worth a notification (time or place). */
 export const EVENT_PUSH_FIELDS = ['startsAt', 'endsAt', 'spotId', 'meetingPoint'];
+/** At most one "time or place changed" notification per event per person in this window. */
+export const EVENT_EDIT_COALESCE_MS = 10 * 60 * 1000;
+/** Repeated friend requests (send, cancel, send…) and clan join requests notify at most once an hour. */
+export const REQUEST_COALESCE_MS = 60 * 60 * 1000;
 
 export function createNotifier(db: Db, push: Push) {
   /** Going + waitlisted people of an event, minus the organizer and anyone who blocked the organizer. */
@@ -133,6 +137,8 @@ export function createNotifier(db: Db, push: Push) {
           channelId: 'messages',
           text: (l) => ({ title: pushText(l, 'friendRequestTitle'), body: pushText(l, 'friendRequestBody', { name: from.displayName }) }),
           data: { type: 'friend_request', userId: from.id },
+          coalesceKey: `friend-request:${from.id}`,
+          coalesceMs: REQUEST_COALESCE_MS,
         }),
       );
     },
@@ -176,6 +182,8 @@ export function createNotifier(db: Db, push: Push) {
           channelId: 'messages',
           text: (l) => ({ title: pushText(l, 'clanRequestTitle'), body: pushText(l, 'clanRequestBody', { name: from.displayName, clan: clan.name }) }),
           data: { type: 'clan_request', clanId: clan.id },
+          coalesceKey: `clan-request:${clan.id}:${from.id}`,
+          coalesceMs: REQUEST_COALESCE_MS,
         });
       });
     },
@@ -228,6 +236,8 @@ export function createNotifier(db: Db, push: Push) {
             body: place ? pushText(l, 'editedPlaceBody', { when, place }) : pushText(l, 'editedBody', { when }),
           }),
           data: { type: 'event', eventId },
+          coalesceKey: `event-edit:${eventId}`,
+          coalesceMs: EVENT_EDIT_COALESCE_MS,
         });
       });
     },
