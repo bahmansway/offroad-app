@@ -25,6 +25,20 @@ interface AuthValue {
 
 const AuthContext = createContext<AuthValue | null>(null);
 
+/** v5: work that must run while still logged in, right before logout (e.g. removing this phone's push token). */
+const beforeLogout = new Set<() => Promise<void>>();
+export function onBeforeLogout(fn: () => Promise<void>): () => void {
+  beforeLogout.add(fn);
+  return () => { beforeLogout.delete(fn); };
+}
+/** Runs the hooks; never fails and never takes longer than `capMs` (logout must stay fast offline). */
+export async function runBeforeLogout(capMs = 4000): Promise<void> {
+  const all = Promise.all([...beforeLogout].map((fn) => fn().catch(() => { /* best effort */ })));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([all, new Promise((r) => { timer = setTimeout(r, capMs); })]);
+  if (timer) clearTimeout(timer);
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    await runBeforeLogout();
     let refreshToken: string | undefined;
     try {
       refreshToken = (await client.getTokens())?.refreshToken;

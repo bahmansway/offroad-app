@@ -43,6 +43,13 @@
       "when": 1793292509206,
       "tag": "0005_v4_leaderboard_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795204148750,
+      "tag": "0006_v5_push",
+      "breakpoints": true
     }
   ]
 }

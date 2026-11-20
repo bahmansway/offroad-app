@@ -513,3 +513,11 @@ export interface Leaderboard {
 export interface GroupEvent { conversationId: Id }
 /** `friend:accepted` socket payload (`user` = the other person) */
 export interface FriendAccepted { user: UserRef }
+
+/** v5: GET/PATCH /api/me/notification-settings (server-side switches, all on by default). */
+export interface NotificationSettings {
+  messages: boolean;
+  friends: boolean;
+  clans: boolean;
+  events: boolean;
+}

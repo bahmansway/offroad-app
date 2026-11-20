@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, isNull, sql } from 'drizzle-orm';
-import { clanInvites, friendRequests, friendships, users } from '../db/schema.js';
+import { friendRequests, friendships, users } from '../db/schema.js';
 import type { Db, Tx } from '../db/index.js';
 import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
 import { makeLimiter } from '../lib/limits.js';
@@ -12,12 +12,11 @@ import {
   MAX_PENDING_OUTGOING,
   areFriends,
   friendCount,
-  incomingRequestCount,
   likePattern,
   notBlockedSql,
   lockPair,
 } from '../lib/friends.js';
-import { unreadTotal } from './chat.js';
+import { badgeCounts } from '../lib/badges.js';
 
 type ReqRow = typeof friendRequests.$inferSelect;
 
@@ -106,10 +105,14 @@ export async function friendRoutes(app: FastifyInstance) {
     const user = await refOf(db, userId);
     if (result.accepted) {
       await notifyAccepted(me, userId);
+      // they had asked me first: tell them I accepted
+      const meRef = await refOf(db, me);
+      if (meRef) app.notify.friendAccepted(userId, meRef);
       return reply.status(200).send({ status: 'friends', request: null, user });
     }
     const payload = await toRequest(db, result.request);
     app.realtime.toUser(userId, 'friend:request', payload);
+    if (payload.from) app.notify.friendRequest(userId, payload.from);
     return reply.status(201).send({ status: 'pending', request: payload, user });
   });
 
@@ -167,6 +170,8 @@ export async function friendRoutes(app: FastifyInstance) {
       await tx.delete(friendRequests).where(and(eq(friendRequests.fromId, me), eq(friendRequests.toId, r.fromId)));
     });
     await notifyAccepted(me, r0.fromId);
+    const meRef = await refOf(db, me);
+    if (meRef) app.notify.friendAccepted(r0.fromId, meRef);
     return { status: 'friends', user: await refOf(db, r0.fromId) };
   });
 
@@ -222,16 +227,5 @@ export async function friendRoutes(app: FastifyInstance) {
   });
 
   // Tab badges in one call.
-  app.get('/me/badges', { preHandler: app.authenticate }, async (req) => {
-    const me = req.userId!;
-    const [inv] = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(clanInvites)
-      .where(and(eq(clanInvites.userId, me), isNull(clanInvites.declinedAt), sql`${clanInvites.expiresAt} > now()`));
-    return {
-      messages: await unreadTotal(db, me),
-      friendRequests: await incomingRequestCount(db, me),
-      clanInvites: inv.n,
-    };
-  });
+  app.get('/me/badges', { preHandler: app.authenticate }, async (req) => badgeCounts(db, req.userId!));
 }

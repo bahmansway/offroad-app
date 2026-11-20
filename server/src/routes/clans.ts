@@ -324,7 +324,17 @@ export async function clanRoutes(app: FastifyInstance) {
     if (c.isOpen) {
       await lockClan(id, (tx) => insertMember(tx, id, me));
       await joinChat(id, me);
-    } else await db.insert(clanRequests).values({ clanId: id, userId: me }).onConflictDoNothing();
+    } else {
+      const added = await db
+        .insert(clanRequests)
+        .values({ clanId: id, userId: me })
+        .onConflictDoNothing()
+        .returning({ userId: clanRequests.userId });
+      if (added.length) {
+        const [who] = await db.select({ id: users.id, displayName: users.displayName }).from(users).where(eq(users.id, me));
+        if (who) app.notify.clanJoinRequest({ id: c.id, name: c.name }, who);
+      }
+    }
     return toClan(db, c, me, undefined, await ranks());
   });
 
@@ -562,6 +572,7 @@ export async function clanRoutes(app: FastifyInstance) {
     const [inviter] = await db.select(userRefCols).from(users).where(eq(users.id, me));
     const payload = { ...toInvite({ inv, clan: await loadClan(id) }), invitedBy: userRef(inviter) };
     app.realtime.toUser(userId, 'clan:invite', payload);
+    app.notify.clanInvite(userId, { id: inviter.id, displayName: inviter.displayName }, { id: payload.clan.id, name: payload.clan.name }, inv.id);
     return reply.status(201).send({ ...payload, user: { id: userId } });
   });
 

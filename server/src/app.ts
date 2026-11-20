@@ -27,6 +27,9 @@ import { searchRoutes } from './routes/search.js';
 import { createLeaderboard, type Leaderboard } from './lib/leaderboard.js';
 import { createRealtime, type Realtime } from './lib/realtime.js';
 import { UPLOAD_CONTENT_TYPES } from './lib/images.js';
+import { createPush, type Push } from './lib/push.js';
+import { createNotifier, type Notifier } from './lib/notify.js';
+import { notificationRoutes } from './routes/notifications.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -36,6 +39,10 @@ declare module 'fastify' {
     realtime: Realtime;
     /** Scoreboard with a 5-minute in-memory cache. */
     leaderboard: Leaderboard;
+    /** v5: Expo push sender (fire-and-forget). */
+    push: Push;
+    /** v5: who gets which phone notification. */
+    notify: Notifier;
     /** preHandler: requires a valid access token. */
     authenticate: (req: FastifyRequest) => Promise<void>;
   }
@@ -77,7 +84,11 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
   app.decorate('config', config);
   app.decorate('realtime', null as unknown as Realtime);
   app.decorate('leaderboard', createLeaderboard(db));
+  const push = createPush({ db, config: config.push, log: app.log });
+  app.decorate('push', push);
+  app.decorate('notify', createNotifier(db, push));
   app.addHook('onClose', async () => {
+    await push.close(); // finish push work before the database pool goes away
     await pool.end();
   });
   if (opts.migrate !== false) await runMigrations(db);
@@ -161,6 +172,7 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
       await api.register(friendRoutes);
       await api.register(groupRoutes);
       await api.register(searchRoutes);
+      await api.register(notificationRoutes);
       api.setNotFoundHandler((_req, reply) => {
         reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
       });

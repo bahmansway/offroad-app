@@ -5,7 +5,7 @@ import type {
   Badges, ConversationMember, FriendItem, FriendRequest, FriendRequestResult, Leaderboard, LeaderboardPeriod, SearchResult,
   AuthResponse, Car, CarInput, CarSummary, CatalogBrand, CatalogModel, Clan, ClanInput, ClanMember, ClanRequest,
   ClanInvite, Conversation, EventCreateInput, EventDetail, EventInput, EventParticipant, EventScope, EventSummary, Id,
-  MeInput, MemberRole, Message, Mod, ModInput, MyClanInvite, Pinned, PublicUser, RatingResult, ReportTarget, Spot,
+  MeInput, MemberRole, NotificationSettings, Message, Mod, ModInput, MyClanInvite, Pinned, PublicUser, RatingResult, ReportTarget, Spot,
   SpotInput, SpotType, Trim, User, UserRef,
 } from './types';
 import { toArray } from './catalog';
@@ -161,6 +161,15 @@ export const api = {
   friends: (q?: string) => r<{ items: FriendItem[] }>('/api/friends', { query: { q } }),
   unfriend: (userId: Id) => r<void>(`/api/friends/${enc(userId)}`, { method: 'DELETE' }),
   badges: () => r<Badges>('/api/me/badges'),
+
+  // v5 phone notifications
+  registerPushToken: (b: { token: string; platform: 'ios' | 'android'; locale: 'az' | 'en' }) =>
+    r<void>('/api/me/push-tokens', { method: 'POST', body: b }),
+  unregisterPushToken: (token: string) =>
+    r<void>('/api/me/push-tokens', { method: 'DELETE', body: { token } }),
+  notificationSettings: () => r<NotificationSettings>('/api/me/notification-settings'),
+  updateNotificationSettings: (b: Partial<NotificationSettings>) =>
+    r<NotificationSettings>('/api/me/notification-settings', { method: 'PATCH', body: b }),
 
   // v4 search + leaderboard
   search: (q: string) => r<SearchResult>('/api/search', { query: { q } }),

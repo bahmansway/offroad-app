@@ -505,3 +505,47 @@ export const friendships = pgTable(
     check('friendships_not_self', sql`${t.userId} <> ${t.friendId}`),
   ],
 );
+
+
+// ---------------- v5: phone notifications ----------------
+
+export const PUSH_PLATFORMS = ['ios', 'android'] as const;
+export const PUSH_LOCALES = ['az', 'en'] as const;
+
+/**
+ * Expo push tokens (one row per phone app install). A token belongs to the last user who registered it,
+ * so logging in as someone else on the same phone moves it.
+ */
+export const pushTokens = pgTable(
+  'push_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull(),
+    platform: text('platform', { enum: PUSH_PLATFORMS }).notNull(),
+    /** Language of the texts the server writes (friend request, event cancelled ...). */
+    locale: text('locale', { enum: PUSH_LOCALES }).notNull().default('az'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('push_tokens_token_idx').on(t.token),
+    index('push_tokens_user_idx').on(t.userId),
+    check('push_tokens_platform_check', sql`${t.platform} in ('ios','android')`),
+    check('push_tokens_locale_check', sql`${t.locale} in ('az','en')`),
+  ],
+);
+
+/** Per-user notification switches. No row = everything on. */
+export const notificationSettings = pgTable('notification_settings', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  messages: boolean('messages').notNull().default(true),
+  friends: boolean('friends').notNull().default(true),
+  clans: boolean('clans').notNull().default(true),
+  events: boolean('events').notNull().default(true),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

@@ -27,6 +27,10 @@ import {
   joinState, placeName, placesLeft, splitParticipants, waitlistPosition,
 } from '../../lib/eventLogic';
 import type { CarSummary, EventDetail, EventParticipant, Id, Spot } from '../../lib/types';
+import { useNotifications } from '../../lib/notifications';
+import { addToCalendar, calendarMode, storedCalendarEntry } from '../../lib/calendar';
+import { calendarState, type StoredCalendarEntry } from '../../lib/calendarLogic';
+import { API_URL } from '../../lib/config';
 
 const NO_SPOTS: Spot[] = [];
 
@@ -48,6 +52,9 @@ export default function EventScreen() {
   const [carId, setCarId] = useState<Id | null>(null);
   const [seats, setSeats] = useState(0);
   const [menuFor, setMenuFor] = useState<EventParticipant | null>(null);
+  const notifications = useNotifications();
+  const [calEntry, setCalEntry] = useState<StoredCalendarEntry | null>(null);
+  const [calNote, setCalNote] = useState<{ text: string; error: boolean } | null>(null);
 
   /** only the newest load may fill the page (user switch, quick reloads) */
   const loadSeq = useRef(0);
@@ -60,11 +67,19 @@ export default function EventScreen() {
       setEv(e);
       setPeople(p.items);
       setGone(false);
+      // keep this event's reminders right (joined, left, time changed, cancelled)
+      notifications.syncEventReminders(e);
     } catch (e) {
       if (my !== loadSeq.current) return;
       if (e instanceof ApiError && e.status === 404) setGone(true);
       else setLoadError(e);
     }
+  }, [id, notifications.syncEventReminders]);
+
+  useEffect(() => {
+    let alive = true;
+    storedCalendarEntry(String(id)).then((v) => { if (alive) setCalEntry(v); });
+    return () => { alive = false; };
   }, [id]);
 
   // A different account (or logged out) must not see the previous user's event state, cars or chat link.
@@ -141,6 +156,21 @@ export default function EventScreen() {
     if (!(await confirmAsync(t('events.leaveConfirm'), t('events.leave'), t('common.cancel'), { destructive: true }))) return;
     act('leave', () => api.leaveEvent(id), t('events.left'));
   };
+
+  async function calendar() {
+    if (!ev) return;
+    setBusy('calendar');
+    setCalNote(null);
+    const r = await addToCalendar(ev, { appUrl: API_URL, meetingPointWord: t('events.meetingPoint') });
+    setBusy(null);
+    if (r.ok) {
+      successFeedback();
+      setCalNote({ text: t(r.action === 'downloaded' ? 'calendar.downloaded' : r.action === 'updated' ? 'calendar.updated' : 'calendar.added'), error: false });
+      setCalEntry(await storedCalendarEntry(String(ev.id)));
+    } else {
+      setCalNote({ text: t(`calendar.${r.reason}`), error: true });
+    }
+  }
 
   async function changeCover() {
     const r = await pickPhoto('car');
@@ -222,6 +252,27 @@ export default function EventScreen() {
       />
     );
   };
+
+  // "Add to calendar": phone calendar (remembers the entry, offers an update when time / place changed) or .ics on the web
+  const calState = calendarMode === 'device' ? calendarState(calEntry, ev) : 'add';
+  const showCalendar = ev.status === 'scheduled' && Date.parse(ev.startsAt) > Date.now();
+  const calendarArea = showCalendar ? (
+    <View style={{ gap: 6 }}>
+      <PillButton
+        title={calState === 'update' ? t('calendar.update') : calState === 'added' ? t('calendar.inCalendar') : t('calendar.add')}
+        icon={calState === 'added' ? 'check' : 'calendarSmall'}
+        variant={calState === 'update' ? 'tinted' : 'gray'}
+        size="medium"
+        onPress={calendar}
+        loading={busy === 'calendar'}
+        disabled={calState === 'added'}
+      />
+      {calState === 'update' && !calNote ? <Txt variant="footnote" tone="label2" center>{t('calendar.changedHint')}</Txt> : null}
+      {calNote ? (
+        <Txt variant="footnote" tone={calNote.error ? 'destructive' : 'label2'} center role={calNote.error ? 'alert' : undefined} accessibilityLiveRegion="polite">{calNote.text}</Txt>
+      ) : null}
+    </View>
+  ) : null;
 
   let mainArea: React.ReactNode = null;
   if (js === 'closed') {
@@ -338,6 +389,8 @@ export default function EventScreen() {
               left={<IconTile icon="people" />}
             />
           </Section>
+
+          {calendarArea}
 
           {loc ? (
             <View style={{ gap: 8 }}>

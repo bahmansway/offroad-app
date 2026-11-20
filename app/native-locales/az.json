@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "YOLCHU",
+    "NSCalendarsUsageDescription": "YOLCHU tədbirləri təqviminizə əlavə etmək üçün təqvimə giriş istəyir.",
+    "NSCalendarsFullAccessUsageDescription": "YOLCHU tədbirləri təqviminizə əlavə etmək və vaxtı dəyişəndə yeniləmək üçün təqvimə giriş istəyir.",
+    "NSPhotoLibraryUsageDescription": "Profiliniz və ya maşınınız üçün şəkil seçin."
+  }
+}

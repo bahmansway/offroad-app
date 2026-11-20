@@ -68,6 +68,8 @@ interface ChatValue {
   session: () => number;
   /** v4: drop a conversation from the list (left / removed from a group) */
   drop: (id: Id) => void;
+  /** v5: the chat open on screen right now (no notification banner for it) */
+  openId: () => Id | null;
 }
 
 const ChatContext = createContext<ChatValue | null>(null);
@@ -314,6 +316,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, [setList]);
 
   const currentSession = useCallback(() => session.current, []);
+  const openId = useCallback(() => openRef.current, []);
 
   const drop = useCallback((id: Id) => {
     const l = listRef.current;
@@ -381,9 +384,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     () => ({
       conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm,
       on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop,
-      session: currentSession,
+      session: currentSession, openId,
     }),
-    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm, on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop, currentSession],
+    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm, on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop, currentSession, openId],
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

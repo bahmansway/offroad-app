@@ -17,7 +17,12 @@
         "backgroundColor": "#C2410C",
         "foregroundImage": "./assets/brand/adaptive-icon.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR"
+      ]
     },
     "web": {
       "favicon": "./assets/brand/favicon.png",
@@ -53,6 +58,21 @@
             "image": "./assets/brand/splash-icon.png"
           }
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/brand/notification-icon.png",
+          "color": "#C2410C",
+          "defaultChannel": "messages"
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "YOLCHU adds events you join to your calendar and updates them when the time changes.",
+          "remindersPermission": false
+        }
       ]
     ],
     "scheme": "offroad",
@@ -76,6 +96,10 @@
     },
     "updates": {
       "url": "https://u.expo.dev/99c3d8a0-93a8-4404-8e6c-8cebf38958a2"
+    },
+    "locales": {
+      "az": "./native-locales/az.json",
+      "en": "./native-locales/en.json"
     }
   }
 }

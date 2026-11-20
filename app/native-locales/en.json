@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "YOLCHU",
+    "NSCalendarsUsageDescription": "YOLCHU adds events you join to your calendar.",
+    "NSCalendarsFullAccessUsageDescription": "YOLCHU adds events you join to your calendar and updates them when the time changes.",
+    "NSPhotoLibraryUsageDescription": "Choose a photo for your profile or your car."
+  }
+}

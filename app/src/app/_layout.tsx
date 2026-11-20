@@ -7,6 +7,7 @@ import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_7
 import { I18nProvider } from '../lib/i18n';
 import { AuthProvider } from '../lib/auth';
 import { ChatProvider } from '../lib/chat';
+import { NotificationsProvider } from '../lib/notifications';
 import { ThemeProvider, useTheme } from '../lib/themeContext';
 import { palettes } from '../lib/theme';
 import { OfflineBanner } from '../components/OfflineBanner';
@@ -42,6 +43,7 @@ function AppStack() {
         <Stack.Screen name="event/cancel/[id]" options={sheet} />
         <Stack.Screen name="leaderboard-info" options={sheet} />
         <Stack.Screen name="chat/add-members/[id]" options={sheet} />
+        <Stack.Screen name="notifications-intro" options={sheet} />
       </Stack>
     </>
   );
@@ -56,7 +58,9 @@ export default function RootLayout() {
         <I18nProvider>
           <AuthProvider>
             <ChatProvider>
-              <AppStack />
+              <NotificationsProvider>
+                <AppStack />
+              </NotificationsProvider>
             </ChatProvider>
           </AuthProvider>
         </I18nProvider>

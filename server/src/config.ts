@@ -15,6 +15,16 @@ export interface AppConfig {
     friendRequests: number; // per user / hour
   };
   logger: boolean;
+  push: {
+    /** Expo push service base URL (tests point this at a local mock). */
+    apiUrl: string;
+    /** Optional Expo access token ("enhanced security for push notifications"). Never logged. */
+    accessToken: string | null;
+    /** At most one message notification per chat per person in this window (ms). */
+    coalesceMs: number;
+    /** How long after sending the receipts are checked (ms). */
+    receiptDelayMs: number;
+  };
 }
 
 export const DEV_JWT_SECRET = 'dev-only-insecure-secret-do-not-use-in-production';
@@ -62,5 +72,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       friendRequests: num(env.RATE_LIMIT_FRIEND_REQUESTS, 30),
     },
     logger: env.NODE_ENV !== 'test',
+    push: {
+      apiUrl: (env.EXPO_PUSH_URL || 'https://exp.host').replace(/\/+$/, ''),
+      accessToken: env.EXPO_ACCESS_TOKEN || null,
+      coalesceMs: num(env.PUSH_COALESCE_MS, 30_000),
+      receiptDelayMs: num(env.PUSH_RECEIPT_DELAY_MS, 15 * 60 * 1000),
+    },
   };
 }

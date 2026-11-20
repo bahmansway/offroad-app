@@ -344,6 +344,8 @@ export async function chatRoutes(app: FastifyInstance) {
       .set({ lastReadAt: inserted[0].createdAt })
       .where(and(eq(conversationMembers.conversationId, id), eq(conversationMembers.userId, me)));
     const msg = await broadcastMessage(app, inserted[0], userRef(sender));
+    // phone notifications run in the background (never delays the reply)
+    app.notify.message(conv, inserted[0], { id: me, displayName: sender.displayName });
     return reply.status(201).send(msg);
   });
 

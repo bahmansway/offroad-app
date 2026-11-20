@@ -300,6 +300,12 @@ export async function eventRoutes(app: FastifyInstance) {
     convId: string | null,
     out: { msgs: MsgRow[]; add: string[]; remove: string[] },
   ) => {
+    // phone notifications for people moved from the waitlist to going
+    const promoted = out.msgs
+      .filter((m) => m.systemKey === 'event.promoted')
+      .map((m) => String((m.systemParams as { userId?: unknown } | null)?.userId ?? ''))
+      .filter(Boolean);
+    app.notify.eventPromoted(eventId, promoted);
     if (!convId) return;
     for (const u of out.add) app.realtime.addMember(u, convId);
     for (const m of out.msgs) await broadcastMessage(app, m, null);
@@ -498,6 +504,7 @@ export async function eventRoutes(app: FastifyInstance) {
     const me = req.userId!;
     if (b.spotId) await checkSpot(b.spotId);
     const out = { msgs: [] as MsgRow[], add: [] as string[], remove: [] as string[] };
+    let changed: string[] = [];
     const convId = await withEventLock(id, async (tx, e, convId) => {
       await assertVisible(tx, id, me);
       if (e.organizerId !== me) throw forbidden('Only the organizer can edit this event');
@@ -547,12 +554,13 @@ export async function eventRoutes(app: FastifyInstance) {
         if (isForeignKeyViolation(err)) throw notFound('Spot not found');
         throw err;
       }
-      const changed = changedFields(e, b, set);
+      changed = changedFields(e, b, set);
       if (changed.length) await sysMsg(tx, convId, out.msgs, 'event.edited', { fields: changed });
       if (b.maxCars !== undefined && b.maxCars > e.maxCars) await promote(tx, { ...e, maxCars: b.maxCars }, convId, out.msgs);
       return convId;
     });
     await afterCommit(id, convId, out);
+    app.notify.eventEdited(id, changed);
     return loadEvent(db, id, me);
   });
 
@@ -576,6 +584,7 @@ export async function eventRoutes(app: FastifyInstance) {
       return convId;
     });
     await afterCommit(id, convId, out);
+    app.notify.eventCancelled(id);
     return loadEvent(db, id, me);
   });
 

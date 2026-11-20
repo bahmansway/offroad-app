@@ -95,6 +95,15 @@ export default function ProfileScreen() {
         minHeight={56}
       />
       <Cell title={t('profile.appearance')} value={appearanceLabel} left={<IconTile icon="moon" bg={c.indigo} />} onPress={() => router.push('/about?section=appearance')} />
+      {user ? (
+        <Cell
+          title={t('notifications.title')}
+          subtitle={t('notifications.rowSubtitle')}
+          left={<IconTile icon="bell" />}
+          onPress={() => router.push('/notifications')}
+          accessibilityRole="link"
+        />
+      ) : null}
       <Cell title={t('profile.about')} left={<IconTile icon="info" bg={c.gray} />} onPress={() => router.push('/about')} />
     </Section>
   );
