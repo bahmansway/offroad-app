@@ -303,7 +303,7 @@ export async function clanRoutes(app: FastifyInstance) {
     await loadLed(id, me); // cheap checks before resizing
     const { imageId, old } = await storeImage(db, me, 'clan', req.body, {
       current: async (tx) => {
-        const [c] = await tx.select({ leaderId: clans.leaderId, logo: clans.logoImageId }).from(clans).where(eq(clans.id, id)).limit(1);
+        const [c] = await tx.select({ leaderId: clans.leaderId, logo: clans.logoImageId }).from(clans).where(eq(clans.id, id)).limit(1).for('update');
         if (!c) throw notFound('Clan not found');
         if (c.leaderId !== me) throw forbidden('Only the clan leader can do this');
         return c.logo;
