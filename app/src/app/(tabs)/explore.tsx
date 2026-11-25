@@ -29,6 +29,8 @@ import type { Spot } from '../../lib/types';
 /** The map only re-renders when its own props change (not on sheet / filter / list changes). */
 const MemoMap = React.memo(SpotMap as React.ComponentType<MapProps>);
 
+/** The server returns at most this many spots per list; at the cap the count reads "500+". */
+const SPOTS_CAP = 500;
 const SEARCH_H = 50;
 const ROW_GAP = 12;
 const SEG_H = 44;
@@ -245,7 +247,7 @@ export default function ExploreScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 20, paddingRight: 8, paddingBottom: 6 }}>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Txt variant="title2" accessibilityRole="header">{t('explore.nearYou')}</Txt>
-                    <Txt variant="footnote" tone="label2" numberOfLines={1}>{t('explore.placesFromBaku', { count: near.length })}</Txt>
+                    <Txt variant="footnote" tone="label2" numberOfLines={1}>{t(near.length >= SPOTS_CAP ? 'explore.placesFromBakuMore' : 'explore.placesFromBaku', { count: near.length })}</Txt>
                   </View>
                   <Pressable
                     accessibilityRole="button"
@@ -404,7 +406,7 @@ function FilterPopover({ range, onRange, maxHeight, width, count, onClose }: {
                 }, pressed && { opacity: 0.75 }]}
               >
                 <Txt style={{ fontSize: 20, lineHeight: 24, fontWeight: '800' }} color={on ? sc.num : c.label2}>{String(n)}</Txt>
-                <Txt style={{ fontSize: 11, lineHeight: 13, fontWeight: '600' }} color={on ? sc.text : c.label2} numberOfLines={1}>{d.levels.names[n - 1]}</Txt>
+                <Txt style={{ fontSize: 11, lineHeight: 13, fontWeight: '600' }} color={on ? sc.text : c.label2} numberOfLines={1}>{d.levels.short[n - 1]}</Txt>
               </Pressable>
             );
           })}

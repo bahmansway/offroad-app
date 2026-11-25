@@ -177,7 +177,7 @@ describe('Explore sheet snaps', () => {
     expect(sheetLink('full')).toBe('less');
     expect(snapAfterLink('collapsed')).toBe('half');
     expect(snapAfterLink('half')).toBe('full');
-    expect(snapAfterLink('full')).toBe('collapsed');
+    expect(snapAfterLink('full')).toBe('half');
   });
   it('filter popover always ends above the sheet', () => {
     const top = 120;
@@ -344,5 +344,29 @@ describe('v6 review fixes', () => {
     expect(gone.draftId).toBeNull();
     expect(await discardDraft(freshUpload(), del)).toBe('none');
     expect(del).toHaveBeenCalledTimes(1);
+  });
+});
+
+import { homeIntro } from '../homeLogic';
+
+describe('tester fixes', () => {
+  it('welcome card only for an empty feed; small suggestions row while following < 3', () => {
+    expect(homeIntro(null, 0)).toBe('none');
+    expect(homeIntro([], 0)).toBe('welcome');
+    expect(homeIntro([{ suggested: true }], 1)).toBe('welcome');
+    expect(homeIntro([{ suggested: false }, { suggested: true }], 1)).toBe('suggest');
+    expect(homeIntro([{ suggested: false }], null)).toBe('none');
+    expect(homeIntro([{ suggested: false }], 5)).toBe('none');
+  });
+  it('sheet link moves one snap at a time', () => {
+    expect(snapAfterLink('collapsed')).toBe('half');
+    expect(snapAfterLink('half')).toBe('full');
+    expect(snapAfterLink('full')).toBe('half');
+  });
+  it('popover level words fit: short words in both languages', () => {
+    for (const lang of ['az', 'en'] as const) {
+      const short = translate(lang, 'levels.short.4');
+      expect(short.length).toBeLessThanOrEqual(8);
+    }
   });
 });

@@ -49,9 +49,9 @@ export function sheetLink(snap: Snap): 'more' | 'less' {
   return snap === 'full' ? 'less' : 'more';
 }
 
-/** Tapping the link: one step up (collapsed → half → full); at full it goes back down to collapsed. */
+/** Tapping the link moves one snap at a time: "Daha çox" collapsed → half → full, "Daha az" full → half. */
 export function snapAfterLink(snap: Snap): Snap {
-  return snap === 'collapsed' ? 'half' : snap === 'half' ? 'full' : 'collapsed';
+  return snap === 'collapsed' ? 'half' : snap === 'half' ? 'full' : 'half';
 }
 
 /** A drag counts only once the finger moved a few px vertically (so taps on the header still work). */

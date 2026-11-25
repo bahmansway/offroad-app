@@ -19,7 +19,7 @@ import { useI18n } from '../../lib/i18n';
 import { useTheme } from '../../lib/themeContext';
 import { errorMessage } from '../../lib/errors';
 import { appendPage, patchPost, removeAuthor, removePost, replaceWithFirstPage, shouldLoadMore } from '../../lib/postsLogic';
-import { clearFeedCache, feedCacheGen, pickSuggestions, pickTrips, readFeedCache, startsSuggested, writeFeedCache, type TripCard } from '../../lib/homeLogic';
+import { clearFeedCache, feedCacheGen, homeIntro, pickSuggestions, pickTrips, readFeedCache, startsSuggested, writeFeedCache, type TripCard } from '../../lib/homeLogic';
 import { bakuParts, dateBlock, formatEventWhen } from '../../lib/eventLogic';
 import { formatPoints } from '../../lib/leaderboardLogic';
 import { badgeText } from '../../lib/chatLogic';
@@ -139,7 +139,7 @@ export default function HomeScreen() {
 
   const headerH = insets.top + HEADER_ROW;
   const tabBarTop = Math.max(insets.bottom - 10, 0) + TAB_BAR.gap + TAB_BAR.height;
-  const showWelcome = !!user && items !== null && (items.length === 0 || (followingCount !== null && followingCount < 3));
+  const intro = user ? homeIntro(items, followingCount) : 'none';
   const bell = badgeText(chat.newFollowers);
 
   const listHeader = (
@@ -149,7 +149,7 @@ export default function HomeScreen() {
           <AllEventsLink />
         </View>
       )}
-      {showWelcome ? <Welcome name={user!.displayName} onShare={() => router.push('/post/new')} myId={user!.id} /> : null}
+      {intro !== 'none' ? <Welcome compact={intro === 'suggest'} name={user!.displayName} onShare={() => router.push('/post/new')} myId={user!.id} /> : null}
     </View>
   );
 
@@ -318,7 +318,8 @@ function Trip({ trip }: { trip: TripCard }) {
 }
 
 /** New user: welcome card + "Sürücüləri izlə" (clan mates first, then this month's most active drivers). */
-function Welcome({ name, onShare, myId }: { name: string; onShare: () => void; myId: Id }) {
+/** `compact`: the feed already has posts, so no "empty feed" card, just the suggestions row. */
+function Welcome({ name, onShare, myId, compact }: { name: string; onShare: () => void; myId: Id; compact?: boolean }) {
   const { c } = useTheme();
   const { t, lang } = useI18n();
   const [people, setPeople] = useState<{ id: Id; displayName: string; avatarUrl: string | null; why: string; isFollowing: boolean }[] | null>(null);
@@ -346,17 +347,17 @@ function Welcome({ name, onShare, myId }: { name: string; onShare: () => void; m
 
   return (
     <View style={{ paddingHorizontal: 16, gap: 0 }}>
-      <View style={{ borderRadius: radius.card, backgroundColor: c.card, padding: 20, paddingTop: 22, gap: 6, overflow: 'hidden' }}>
+      {compact ? null : <View style={{ borderRadius: radius.card, backgroundColor: c.card, padding: 20, paddingTop: 22, gap: 6, overflow: 'hidden' }}>
         <Contour color={c.tint} opacity={0.1} seed={5} width={260} height={140} style={{ left: undefined, bottom: undefined, right: -30, top: -10, width: 260, height: 140 }} />
         <MountainMark size={48} color={c.tint} />
         <Txt variant="title2" accessibilityRole="header" style={{ marginTop: 6 }}>{t('home.welcome', { name })}</Txt>
         <Txt variant="subhead" tone="label2">{t('home.emptyText')}</Txt>
         <PillButton title={t('home.shareFirst')} icon="camera" size="medium" onPress={onShare} style={{ marginTop: 12 }} />
-      </View>
+      </View>}
       {people && people.length ? (
         <>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingTop: 18, paddingBottom: 2, minHeight: TAP }}>
-            <Txt variant="footnote" tone="label2" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '600' }} accessibilityRole="header">{t('home.followDrivers')}</Txt>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingTop: compact ? 0 : 18, paddingBottom: 2, minHeight: TAP }}>
+            <Txt variant="footnote" tone="label2" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '600' }} accessibilityRole="header">{compact ? t('home.followMore') : t('home.followDrivers')}</Txt>
             <Pressable accessibilityRole="link" onPress={() => router.push('/leaderboard')} hitSlop={6} style={{ minHeight: TAP, justifyContent: 'center' }}>
               <Txt variant="subhead" tone="tint">{t('home.seeAll')}</Txt>
             </Pressable>

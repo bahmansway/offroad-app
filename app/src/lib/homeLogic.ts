@@ -109,3 +109,15 @@ export function pickSuggestions(o: {
   o.board.filter((x) => !x.blocked).forEach((x) => add(x.user, x.why));
   return out.slice(0, o.max ?? 6);
 }
+
+/**
+ * What sits above the feed for a logged-in user:
+ * - 'welcome': no posts of mine or of people I follow yet (suggested posts don't count) → big card + suggestions
+ * - 'suggest': there are real posts, but I follow fewer than 3 people → only a small "Daha çox sürücü izlə" row
+ * - 'none': otherwise (or still loading)
+ */
+export function homeIntro(items: Pick<Post, 'suggested'>[] | null, followingCount: number | null): 'welcome' | 'suggest' | 'none' {
+  if (items === null) return 'none';
+  if (!items.some((p) => !p.suggested)) return 'welcome';
+  return followingCount !== null && followingCount < 3 ? 'suggest' : 'none';
+}
