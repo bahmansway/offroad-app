@@ -163,14 +163,14 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
       ['u5', 5],
     ]);
     const by = Object.fromEntries(rows.map((r) => [r.userId, r.breakdown]));
-    expect(by[U.u4]).toEqual({ spots: 0, events: 15, attended: 0, cars: 0, ratings: 20 });
-    expect(by[U.u3]).toEqual({ spots: 0, events: 0, attended: 5, cars: 10, ratings: 0 });
-    expect(by[U.u2]).toEqual({ spots: 0, events: 15, attended: 0, cars: 0, ratings: 0 });
-    expect(by[U.u1]).toEqual({ spots: 10, events: 0, attended: 0, cars: 0, ratings: 0 });
-    expect(by[U.u5]).toEqual({ spots: 0, events: 0, attended: 5, cars: 0, ratings: 0 });
-    expect(by[U.u9]).toEqual({ spots: 100, events: 0, attended: 0, cars: 0, ratings: 0 });
-    expect(by[U.u10]).toEqual({ spots: 0, events: 60, attended: 0, cars: 0, ratings: 0 });
-    expect(by[U.u11]).toEqual({ spots: 0, events: 0, attended: 40, cars: 0, ratings: 0 });
+    expect(by[U.u4]).toEqual({ spots: 0, events: 15, attended: 0, cars: 0, ratings: 20, posts: 0 });
+    expect(by[U.u3]).toEqual({ spots: 0, events: 0, attended: 5, cars: 10, ratings: 0, posts: 0 });
+    expect(by[U.u2]).toEqual({ spots: 0, events: 15, attended: 0, cars: 0, ratings: 0, posts: 0 });
+    expect(by[U.u1]).toEqual({ spots: 10, events: 0, attended: 0, cars: 0, ratings: 0, posts: 0 });
+    expect(by[U.u5]).toEqual({ spots: 0, events: 0, attended: 5, cars: 0, ratings: 0, posts: 0 });
+    expect(by[U.u9]).toEqual({ spots: 100, events: 0, attended: 0, cars: 0, ratings: 0, posts: 0 });
+    expect(by[U.u10]).toEqual({ spots: 0, events: 60, attended: 0, cars: 0, ratings: 0, posts: 0 });
+    expect(by[U.u11]).toEqual({ spots: 0, events: 0, attended: 40, cars: 0, ratings: 0, posts: 0 });
     expect(by[U.u8]).toBeUndefined();
   });
 
@@ -189,7 +189,7 @@ describe('leaderboard points (seeded scenario, fixed "now")', () => {
       ['u2', 15],
     ]);
     const u4 = rows.find((r) => r.userId === U.u4)!;
-    expect(u4.breakdown).toEqual({ spots: 0, events: 15, attended: 0, cars: 5, ratings: 25 });
+    expect(u4.breakdown).toEqual({ spots: 0, events: 15, attended: 0, cars: 5, ratings: 25, posts: 0 });
   });
 
   it('the young spot counts once it is 24 h old', async () => {

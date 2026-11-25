@@ -33,6 +33,12 @@ describe('web build serving', () => {
     expect(deep.statusCode).toBe(200);
     expect(deep.body).toContain('SPA');
     expect((await app.inject({ url: '/../../etc/passwd' })).body).not.toContain('root:');
+    // v6 share links open the web app
+    for (const url of ['/p/3f1c2b4a-0000-4000-8000-000000000001', '/spot/3f1c2b4a-0000-4000-8000-000000000002', '/event/3f1c2b4a-0000-4000-8000-000000000003']) {
+      const r = await app.inject({ url });
+      expect(r.statusCode, url).toBe(200);
+      expect(r.body).toContain('SPA');
+    }
   });
   it('missing asset files 404 instead of returning index.html; extensionless routes still work', async () => {
     for (const url of [

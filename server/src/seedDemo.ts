@@ -22,6 +22,7 @@ import {
   conversations,
   eventParticipants,
   events,
+  follows,
   friendRequests,
   friendships,
   messages,
@@ -375,11 +376,17 @@ export async function seedDemo(
           { userId: uid(b).id, friendId: uid(a).id, createdAt: since },
         ]);
         counts.friendships++;
+        // v6: friends = mutual follows
+        await tx.insert(follows).values([
+          { followerId: uid(a).id, followeeId: uid(b).id, createdAt: since },
+          { followerId: uid(b).id, followeeId: uid(a).id, createdAt: since },
+        ]).onConflictDoNothing();
       }
     }
     for (const [a, b] of FRIEND_REQUESTS) {
       await tx.insert(friendRequests).values({ fromId: uid(a).id, toId: uid(b).id, createdAt: cap(bakuDay(-(1 + Math.floor(rand() * 4)), 18)) });
       counts.friendRequests++;
+      await tx.insert(follows).values({ followerId: uid(a).id, followeeId: uid(b).id }).onConflictDoNothing();
     }
 
     // ---------------- DMs ----------------
@@ -563,7 +570,20 @@ export async function removeDemo(db: Db): Promise<{ users: number }> {
         or (target_type = 'car' and target_id in (select id from cars where owner_id in ${demoIds}))
         or (target_type = 'clan' and target_id in (select id from clans where leader_id in ${demoIds}))
         or (target_type = 'event' and target_id in (select id from events where organizer_id in ${demoIds}))
-        or (target_type = 'message' and target_id in (select id from messages where sender_id in ${demoIds}))`);
+        or (target_type = 'message' and target_id in (select id from messages where sender_id in ${demoIds}))
+        or (target_type = 'post' and target_id in (select id from posts where author_id in ${demoIds}))
+        or (target_type = 'comment' and target_id in (
+          select c.id from post_comments c join posts p on p.id = c.post_id
+          where c.author_id in ${demoIds} or p.author_id in ${demoIds}))`);
+
+    // v6: demo posts (with their photos, likes, saves, comments), demo likes / saves / comments on real
+    // posts, and follows either way. Most of this also cascades from the accounts; done explicitly so
+    // nothing depends on the order of cascades.
+    await tx.execute(sql`delete from post_likes where user_id in ${demoIds}`);
+    await tx.execute(sql`delete from post_saves where user_id in ${demoIds}`);
+    await tx.execute(sql`delete from post_comments where author_id in ${demoIds}`);
+    await tx.execute(sql`delete from posts where author_id in ${demoIds}`);
+    await tx.execute(sql`delete from follows where follower_id in ${demoIds} or followee_id in ${demoIds}`);
 
     // DMs with a demo user
     await tx.execute(sql`

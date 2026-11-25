@@ -8,6 +8,7 @@ import { makeLimiter } from '../lib/limits.js';
 import { imageUrl } from '../lib/images.js';
 import { likePattern, notBlockedSql } from '../lib/friends.js';
 import { userRef } from '../lib/users.js';
+import { followedBySql, followsSql } from '../lib/follows.js';
 import { conversationSummary } from './chat.js';
 import type { Period } from '../lib/leaderboard.js';
 
@@ -22,19 +23,21 @@ export async function searchRoutes(app: FastifyInstance) {
     key: (req) => (req.userId ? `search:u:${req.userId}` : `search:ip:${req.ip}`),
   });
 
-  // Users (friends first, blocked either way left out), clans, and my own chats.
+  // Users (people I follow first, blocked either way left out), clans, and my own chats.
   app.get('/search', { preHandler: searchLimit }, async (req) => {
     const { q } = parse(searchQuery, req.query);
     const me = req.userId;
     const like = likePattern(q);
+    // v6: "people I follow" first; isFriend ("Dost") = we follow each other
+    const isFollowing = me ? followsSql(me, users.id) : sql<boolean>`false`;
     const isFriend = me
-      ? sql<boolean>`exists (select 1 from friendships f where f.user_id = ${me} and f.friend_id = ${users.id})`
+      ? sql<boolean>`(${followsSql(me, users.id)} and ${followedBySql(me, users.id)})`
       : sql<boolean>`false`;
     const userRows = await db
-      .select({ id: users.id, displayName: users.displayName, avatarImageId: users.avatarImageId, city: users.city, isFriend })
+      .select({ id: users.id, displayName: users.displayName, avatarImageId: users.avatarImageId, city: users.city, isFriend, isFollowing })
       .from(users)
       .where(and(ilike(users.displayName, like), me ? ne(users.id, me) : undefined, me ? notBlockedSql(me, users.id) : undefined))
-      .orderBy(...(me ? [desc(isFriend)] : []), asc(sql`lower(${users.displayName})`), asc(users.id))
+      .orderBy(...(me ? [desc(isFollowing)] : []), asc(sql`lower(${users.displayName})`), asc(users.id))
       .limit(10);
     const memberCount = sql<number>`(select count(*)::int from ${clanMembers} m where m.clan_id = ${clans.id})`;
     const clanRows = await db
@@ -72,7 +75,7 @@ export async function searchRoutes(app: FastifyInstance) {
       convs = await Promise.all(rows.map((r) => conversationSummary(db, r.c, me)));
     }
     return {
-      users: userRows.map((u) => ({ ...userRef(u), city: u.city, isFriend: !!u.isFriend })),
+      users: userRows.map((u) => ({ ...userRef(u), city: u.city, isFriend: !!u.isFriend, isFollowing: !!u.isFollowing })),
       clans: clanRows.map((r) => ({
         id: r.c.id,
         name: r.c.name,

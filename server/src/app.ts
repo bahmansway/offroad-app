@@ -30,6 +30,9 @@ import { UPLOAD_CONTENT_TYPES } from './lib/images.js';
 import { createPush, type Push } from './lib/push.js';
 import { createNotifier, type Notifier } from './lib/notify.js';
 import { notificationRoutes } from './routes/notifications.js';
+import { postRoutes } from './routes/posts.js';
+import { followRoutes } from './routes/follows.js';
+import { cleanupDrafts, DRAFT_CLEANUP_EVERY_MS } from './lib/posts.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -93,6 +96,15 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
   });
   if (opts.migrate !== false) await runMigrations(db);
   await pruneRefreshTokens(db).catch((err) => app.log.warn({ err }, 'refresh token cleanup failed'));
+  // v6: unpublished post drafts older than 24 h are deleted on startup and then every hour
+  const dropDrafts = () =>
+    cleanupDrafts(db)
+      .then((n) => n && app.log.info({ count: n }, 'old post drafts deleted'))
+      .catch((err) => app.log.warn({ err }, 'draft cleanup failed'));
+  await dropDrafts();
+  const draftTimer = setInterval(() => void dropDrafts(), DRAFT_CLEANUP_EVERY_MS);
+  draftTimer.unref();
+  app.addHook('onClose', async () => clearInterval(draftTimer));
 
   // ---- errors: always { error: { code, message } } ----
   app.setErrorHandler((err: any, req, reply) => {
@@ -173,6 +185,8 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
       await api.register(groupRoutes);
       await api.register(searchRoutes);
       await api.register(notificationRoutes);
+      await api.register(postRoutes);
+      await api.register(followRoutes);
       api.setNotFoundHandler((_req, reply) => {
         reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
       });

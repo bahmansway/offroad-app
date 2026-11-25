@@ -14,7 +14,7 @@ import { appBadges } from './badges.js';
  * - Logs only counts, HTTP statuses and Expo error codes: never tokens, never message text.
  */
 
-export type PushCategory = 'messages' | 'friends' | 'clans' | 'events';
+export type PushCategory = 'messages' | 'friends' | 'clans' | 'events' | 'social';
 /** Android notification channels created by the app. */
 export type PushChannel = 'messages' | 'events';
 export type PushLocale = 'az' | 'en';

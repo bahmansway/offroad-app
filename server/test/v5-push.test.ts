@@ -211,12 +211,12 @@ describe('notification settings', () => {
   it('defaults to all on, PATCH changes only what is sent, strict body', async () => {
     const a = await register(app, 'Set');
     expect((await req('GET', '/api/me/notification-settings')).statusCode).toBe(401);
-    expect((await req('GET', '/api/me/notification-settings', a)).json()).toEqual({ messages: true, friends: true, clans: true, events: true });
+    expect((await req('GET', '/api/me/notification-settings', a)).json()).toEqual({ messages: true, friends: true, clans: true, events: true, social: true });
     let r = await req('PATCH', '/api/me/notification-settings', a, { friends: false });
-    expect(r.json()).toEqual({ messages: true, friends: false, clans: true, events: true });
+    expect(r.json()).toEqual({ messages: true, friends: false, clans: true, events: true, social: true });
     r = await req('PATCH', '/api/me/notification-settings', a, { events: false, messages: false });
-    expect(r.json()).toEqual({ messages: false, friends: false, clans: true, events: false });
-    expect((await req('PATCH', '/api/me/notification-settings', a, {})).json()).toEqual({ messages: false, friends: false, clans: true, events: false });
+    expect(r.json()).toEqual({ messages: false, friends: false, clans: true, events: false, social: true });
+    expect((await req('PATCH', '/api/me/notification-settings', a, {})).json()).toEqual({ messages: false, friends: false, clans: true, events: false, social: true });
     expect((await req('PATCH', '/api/me/notification-settings', a, { sms: true })).statusCode).toBe(400);
     expect((await req('PATCH', '/api/me/notification-settings', a, { friends: 'yes' })).statusCode).toBe(400);
   });
@@ -626,7 +626,7 @@ describe('badge numbers in one query', () => {
     const many = await appBadges(app.db, [...ids, a.user.id]);
     for (const id of ids) {
       const one = await badgeCounts(app.db, id);
-      expect(many.get(id), id).toBe(one.messages + one.friendRequests + one.clanInvites);
+      expect(many.get(id), id).toBe(one.messages + one.newFollowers + one.clanInvites);
     }
     expect(many.get(b.user.id)).toBe(1); // only the clan invite
     expect((await appBadges(app.db, [])).size).toBe(0);

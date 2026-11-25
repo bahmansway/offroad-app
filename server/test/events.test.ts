@@ -442,7 +442,7 @@ describe('events: list, limits, cover', () => {
     const { rows } = await sql.query(`select kind from images where id = $1`, [coverUrl.split('/').pop()]);
     expect(rows[0].kind).toBe('event');
     // quota: fill org's storage up to the limit and the next cover is refused
-    await sql.query(`update images set bytes = 20*1024*1024 where id = $1`, [coverUrl.split('/').pop()]);
+    await sql.query(`update images set bytes = 200*1024*1024 where id = $1`, [coverUrl.split('/').pop()]);
     const other = (await req('POST', '/api/events', org, eventBody(org, { title: 'Second cover' }))).json();
     const q = await app.inject({ method: 'PUT', url: `/api/events/${other.id}/cover`, headers: { ...org.auth, 'content-type': 'image/png' }, payload: png });
     expect(q.statusCode).toBe(409);

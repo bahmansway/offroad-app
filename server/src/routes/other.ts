@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { noBlockSql } from '../lib/posts.js';
 import { users, spots, cars, reports, clans, messages, conversationMembers, events, REPORT_TARGETS } from '../db/schema.js';
 import { visibleSql } from './events.js';
 import { notFound, parse } from '../lib/errors.js';
@@ -44,6 +45,19 @@ export async function otherRoutes(app: FastifyInstance) {
           .where(and(eq(events.id, b.targetId), visibleSql(req.userId)))
           .limit(1);
         exists = !!e;
+      } else if (b.targetType === 'post') {
+        // published posts the reporter can see (no block either way); own drafts too
+        const r = await db.execute(sql`
+          select 1 from posts p where p.id = ${b.targetId}
+            and (p.published_at is not null or p.author_id = ${req.userId})
+            and ${noBlockSql(req.userId, 'p.author_id')}`);
+        exists = !!r.rows.length;
+      } else if (b.targetType === 'comment') {
+        const r = await db.execute(sql`
+          select 1 from post_comments c join posts p on p.id = c.post_id where c.id = ${b.targetId}
+            and p.published_at is not null
+            and ${noBlockSql(req.userId, 'p.author_id')} and ${noBlockSql(req.userId, 'c.author_id')}`);
+        exists = !!r.rows.length;
       } else {
         const table = { spot: spots, car: cars, user: users, clan: clans }[b.targetType];
         const [target] = await db.select({ id: table.id }).from(table).where(eq(table.id, b.targetId)).limit(1);

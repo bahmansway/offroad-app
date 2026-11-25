@@ -29,6 +29,12 @@ const T: Record<PushLocale, Record<string, string>> = {
     cancelledReasonBody: 'Tədbir ləğv edildi: {reason}',
     editedBody: 'Vaxt və ya yer dəyişdi: {when}',
     editedPlaceBody: 'Vaxt və ya yer dəyişdi: {when} · {place}',
+    likeTitle: 'Yeni bəyənmə',
+    likeBody: '{name} paylaşımınızı bəyəndi',
+    commentTitle: 'Yeni şərh',
+    commentBody: '{name}: {text}',
+    followTitle: 'Yeni izləyici',
+    followBody: '{name} sizi izləməyə başladı',
   },
   en: {
     friendRequestTitle: 'Friend request',
@@ -44,6 +50,12 @@ const T: Record<PushLocale, Record<string, string>> = {
     cancelledReasonBody: 'The event was cancelled: {reason}',
     editedBody: 'New time or place: {when}',
     editedPlaceBody: 'New time or place: {when} · {place}',
+    likeTitle: 'New like',
+    likeBody: '{name} liked your post',
+    commentTitle: 'New comment',
+    commentBody: '{name}: {text}',
+    followTitle: 'New follower',
+    followBody: '{name} started following you',
   },
 };
 export const pushText = (l: PushLocale, key: string, p: Record<string, string> = {}) =>
@@ -62,6 +74,11 @@ export const EVENT_PUSH_FIELDS = ['startsAt', 'endsAt', 'spotId', 'meetingPoint'
 export const EVENT_EDIT_COALESCE_MS = 10 * 60 * 1000;
 /** Repeated friend requests (send, cancel, send…) and clan join requests notify at most once an hour. */
 export const REQUEST_COALESCE_MS = 60 * 60 * 1000;
+/** v6: at most one "liked your post" per post per hour; one "followed you" per follower per hour. */
+export const LIKE_COALESCE_MS = 60 * 60 * 1000;
+export const FOLLOW_COALESCE_MS = 60 * 60 * 1000;
+/** v6: several comments by the same person on one post within a minute give one notification. */
+export const COMMENT_COALESCE_MS = 60 * 1000;
 
 export function createNotifier(db: Db, push: Push) {
   /** Going + waitlisted people of an event, minus the organizer and anyone who blocked the organizer. */
@@ -89,7 +106,55 @@ export function createNotifier(db: Db, push: Push) {
     return e ?? null;
   };
 
+  /** v6 social notices go only to someone who is not the actor and has no block either way with them. */
+  const socialTo = async (toId: string, actorId: string) => toId !== actorId && !(await eitherBlocked(db, toId, actorId));
+
   return {
+    /** v6: someone liked `authorId`'s post (coalesced: 1 per post per hour). */
+    postLiked(authorId: string, postId: string, by: Who) {
+      push.background(async () => {
+        if (!(await socialTo(authorId, by.id))) return;
+        await push.send([authorId], {
+          category: 'social',
+          channelId: 'messages',
+          text: (l) => ({ title: pushText(l, 'likeTitle'), body: pushText(l, 'likeBody', { name: by.displayName }) }),
+          data: { type: 'post_like', postId },
+          coalesceKey: `like:${postId}`,
+          coalesceMs: LIKE_COALESCE_MS,
+        });
+      });
+    },
+
+    /** v6: a new comment on `authorId`'s post. */
+    postCommented(authorId: string, postId: string, commentId: string, text: string, by: Who) {
+      push.background(async () => {
+        if (!(await socialTo(authorId, by.id))) return;
+        await push.send([authorId], {
+          category: 'social',
+          channelId: 'messages',
+          text: (l) => ({ title: pushText(l, 'commentTitle'), body: truncate(pushText(l, 'commentBody', { name: by.displayName, text })) }),
+          data: { type: 'post_comment', postId, commentId },
+          coalesceKey: `comment:${postId}:${by.id}`,
+          coalesceMs: COMMENT_COALESCE_MS,
+        });
+      });
+    },
+
+    /** v6: `by` started following `toId` (follow / unfollow / follow spam: once an hour). */
+    followed(toId: string, by: Who) {
+      push.background(async () => {
+        if (!(await socialTo(toId, by.id))) return;
+        await push.send([toId], {
+          category: 'social',
+          channelId: 'messages',
+          text: (l) => ({ title: pushText(l, 'followTitle'), body: pushText(l, 'followBody', { name: by.displayName }) }),
+          data: { type: 'follow', userId: by.id },
+          coalesceKey: `follow:${by.id}`,
+          coalesceMs: FOLLOW_COALESCE_MS,
+        });
+      });
+    },
+
     /** New chat message (user messages only; system messages never notify). */
     message(conv: ConvRow, m: { id: string; senderId: string | null; text: string }, sender: Who) {
       if (!m.senderId) return;

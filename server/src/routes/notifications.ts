@@ -24,6 +24,7 @@ const settingsSchema = z
     friends: z.boolean().optional(),
     clans: z.boolean().optional(),
     events: z.boolean().optional(),
+    social: z.boolean().optional(),
   })
   .strict();
 
@@ -63,7 +64,13 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   const read = async (me: string) => {
     const [s] = await db.select().from(notificationSettings).where(eq(notificationSettings.userId, me));
-    return { messages: s?.messages ?? true, friends: s?.friends ?? true, clans: s?.clans ?? true, events: s?.events ?? true };
+    return {
+      messages: s?.messages ?? true,
+      friends: s?.friends ?? true,
+      clans: s?.clans ?? true,
+      events: s?.events ?? true,
+      social: s?.social ?? true,
+    };
   };
 
   app.get('/me/notification-settings', { preHandler: app.authenticate }, async (req) => read(req.userId!));

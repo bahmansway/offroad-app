@@ -131,8 +131,8 @@ describe('friend requests (acceptance check 1)', () => {
     expect((await req('POST', '/api/friends/requests', a, { userId: b.user.id })).statusCode).toBe(409);
     await until(() => got.bReq.length === 1);
     expect(got.bReq[0]).toMatchObject({ id: body.request.id, from: { id: a.user.id, displayName: a.user.displayName } });
-    expect((await req('GET', '/api/me/badges', b)).json()).toEqual({ messages: 0, friendRequests: 1, clanInvites: 0 });
-    expect((await req('GET', '/api/me/badges', a)).json()).toEqual({ messages: 0, friendRequests: 0, clanInvites: 0 });
+    expect((await req('GET', '/api/me/badges', b)).json()).toEqual({ messages: 0, friendRequests: 1, clanInvites: 0, newFollowers: 1 });
+    expect((await req('GET', '/api/me/badges', a)).json()).toEqual({ messages: 0, friendRequests: 0, clanInvites: 0, newFollowers: 0 });
     const inB = (await req('GET', '/api/friends/requests?dir=in', b)).json().items;
     expect(inB.map((x: any) => x.id)).toEqual([body.request.id]);
     expect((await req('GET', '/api/friends/requests?dir=out', a)).json().items.map((x: any) => x.to.id)).toEqual([b.user.id]);

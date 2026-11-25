@@ -13,11 +13,12 @@ import { DEFAULT_EVENT_LENGTH_MS } from './eventState.js';
  *   >= 2 cars going. Counted when the event ends.
  * - car with a photo: 5, only the user's first 2 such cars (by creation time)
  * - rating given (spot or car, not on your own spot): 1, max 20 a month
+ * - v6: photo post shared: 3, max 10 a month (counted when published; deleted posts don't count)
  */
-export const POINTS = { spot: 10, organized: 15, attended: 5, car: 5, rating: 1 } as const;
+export const POINTS = { spot: 10, organized: 15, attended: 5, car: 5, rating: 1, post: 3 } as const;
 export const MAX_CARS_COUNTED = 2;
 /** Most items of each kind counted per Baku month (all-time = sum of the monthly caps). */
-export const MONTHLY_CAPS = { spots: 10, events: 4, attended: 8, ratings: 20 } as const;
+export const MONTHLY_CAPS = { spots: 10, events: 4, attended: 8, ratings: 20, posts: 10 } as const;
 /** A spot counts only once it is this old and nobody has reported it. */
 export const SPOT_MIN_AGE_HOURS = 24;
 /** A spot loses its points once this many different users reported it (one rival's report is not enough). */
@@ -30,7 +31,7 @@ export const LEADERBOARD_CACHE_MS = 5 * 60 * 1000;
 const BAKU_OFFSET_MS = 4 * 60 * 60 * 1000;
 
 export type Period = 'month' | 'all';
-export type Breakdown = { spots: number; events: number; attended: number; cars: number; ratings: number };
+export type Breakdown = { spots: number; events: number; attended: number; cars: number; ratings: number; posts: number };
 
 /** Start of the Baku calendar month containing `now`, and the start of the next one (as UTC instants). */
 export function bakuMonth(now: Date) {
@@ -64,6 +65,7 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
     attended: number;
     cars: number;
     ratings: number;
+    posts: number;
     first_at: Date | string;
   }>(sql`
     with finished as (
@@ -97,6 +99,11 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
         select cr.user_id, cr.created_at, 'c' || cr.car_id::text from car_ratings cr
       ) r
       where ${inRange(sql.raw('r.at'))}
+      union all
+      select p.author_id, 'posts', ${POINTS.post}::int, p.created_at, p.id::text
+      from posts p
+      where p.published_at is not null and ${inRange(sql.raw('p.created_at'))}
+        and exists (select 1 from post_photos ph where ph.post_id = p.id)
     ),
     capped as (
       -- monthly caps per kind (Baku months); the range filter above is month-aligned, so filtering first is safe
@@ -113,6 +120,7 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
         when 'spots' then ${sql.raw(String(MONTHLY_CAPS.spots))}
         when 'events' then ${sql.raw(String(MONTHLY_CAPS.events))}
         when 'attended' then ${sql.raw(String(MONTHLY_CAPS.attended))}
+        when 'posts' then ${sql.raw(String(MONTHLY_CAPS.posts))}
         else ${sql.raw(String(MONTHLY_CAPS.ratings))} end
       union all
       -- cars: the user's first 2 photo cars ever (not a monthly cap), so rank before the range filter
@@ -132,6 +140,7 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
       coalesce(sum(a.pts) filter (where a.kind = 'attended'), 0)::int as attended,
       coalesce(sum(a.pts) filter (where a.kind = 'cars'), 0)::int as cars,
       coalesce(sum(a.pts) filter (where a.kind = 'ratings'), 0)::int as ratings,
+      coalesce(sum(a.pts) filter (where a.kind = 'posts'), 0)::int as posts,
       min(a.at) as first_at
     from act a
     join users u on u.id = a.user_id
@@ -141,7 +150,7 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
   return result.rows.map((r) => ({
     userId: r.user_id,
     points: r.points,
-    breakdown: { spots: r.spots, events: r.events, attended: r.attended, cars: r.cars, ratings: r.ratings },
+    breakdown: { spots: r.spots, events: r.events, attended: r.attended, cars: r.cars, ratings: r.ratings, posts: r.posts },
     firstAt: new Date(r.first_at),
   }));
 }

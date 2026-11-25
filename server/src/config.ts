@@ -13,6 +13,8 @@ export interface AppConfig {
     create: number; // per user / hour, separately for: spots, cars, mods, clans; photo uploads (avatar, car, logo) share one counter
     messages: number; // per user / minute (chat)
     friendRequests: number; // per user / hour
+    posts: number; // v6: posts created per user / 24 h
+    postPhotos: number; // v6: post photo uploads per user / 24 h
   };
   logger: boolean;
   push: {
@@ -70,6 +72,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       create: num(env.RATE_LIMIT_CREATE, 30),
       messages: num(env.RATE_LIMIT_MESSAGES, 30),
       friendRequests: num(env.RATE_LIMIT_FRIEND_REQUESTS, 30),
+      posts: num(env.RATE_LIMIT_POSTS, 20),
+      postPhotos: num(env.RATE_LIMIT_POST_PHOTOS, 60),
     },
     logger: env.NODE_ENV !== 'test',
     push: {

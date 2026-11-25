@@ -7,7 +7,7 @@ import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../li
 import { deleteImage, imageUrl, MAX_UPLOAD_BYTES, processImage, saveImage } from '../lib/images.js';
 import { makeLimiter } from '../lib/limits.js';
 import { broadcastMessage, insertSystemMessage, type SystemKey } from '../lib/messages.js';
-import { notFriends } from '../lib/friends.js';
+import { notMutual } from '../lib/follows.js';
 import { conversationSummary } from './chat.js';
 
 type ConvRow = typeof conversations.$inferSelect;
@@ -55,10 +55,10 @@ export async function groupRoutes(app: FastifyInstance) {
         .orderBy(asc(conversationMembers.joinedAt), asc(conversationMembers.userId))
     ).map((r) => r.id);
 
-  /** The new people must all be my friends, and nobody blocked anybody between me and them. */
+  /** v6: the new people must all follow me and be followed by me ("Dost"), and nobody blocked anybody. */
   const checkInvitees = async (tx: Tx, me: string, ids: string[]) => {
     if (ids.includes(me)) throw badRequest('userIds: do not include yourself');
-    if ((await notFriends(tx, me, ids)).length) throw forbidden('You can only add your friends to a group');
+    if ((await notMutual(tx, me, ids)).length) throw forbidden('You can only add people who follow you and whom you follow');
     const [b] = await tx
       .select({ x: blocks.blockerId })
       .from(blocks)
@@ -69,7 +69,7 @@ export async function groupRoutes(app: FastifyInstance) {
         ),
       )
       .limit(1);
-    if (b) throw forbidden('You can only add your friends to a group');
+    if (b) throw forbidden('You can only add people who follow you and whom you follow');
   };
 
   /** Add members one by one with clock_timestamp so join order (admin succession) is exact. */

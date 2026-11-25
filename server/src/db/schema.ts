@@ -182,7 +182,7 @@ export const mods = pgTable(
   (t) => [index('mods_car_idx').on(t.carId)],
 );
 
-export const REPORT_TARGETS = ['spot', 'car', 'user', 'message', 'clan', 'event'] as const;
+export const REPORT_TARGETS = ['spot', 'car', 'user', 'message', 'clan', 'event', 'post', 'comment'] as const;
 
 export const reports = pgTable(
   'reports',
@@ -212,7 +212,9 @@ export const images = pgTable(
     ownerId: uuid('owner_id')
       .notNull()
       .references((): AnyPgColumn => users.id, { onDelete: 'cascade' }),
-    kind: text('kind', { enum: ['avatar', 'car', 'clan', 'event', 'group'] }).notNull(),
+    kind: text('kind', { enum: ['avatar', 'car', 'clan', 'event', 'group', 'post'] }).notNull(),
+    /** v6: set for post photos, so deleting the post (or an old draft) deletes its photos too. */
+    postId: uuid('post_id').references((): AnyPgColumn => posts.id, { onDelete: 'cascade' }),
     mime: text('mime').notNull().default('image/jpeg'),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
@@ -220,7 +222,7 @@ export const images = pgTable(
     data: bytea('data').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('images_owner_idx').on(t.ownerId)],
+  (t) => [index('images_owner_idx').on(t.ownerId), index('images_post_idx').on(t.postId).where(sql`${t.postId} is not null`)],
 );
 
 export const clans = pgTable(
@@ -547,5 +549,138 @@ export const notificationSettings = pgTable('notification_settings', {
   friends: boolean('friends').notNull().default(true),
   clans: boolean('clans').notNull().default(true),
   events: boolean('events').notNull().default(true),
+  /** v6: likes, comments and new followers. */
+  social: boolean('social').notNull().default(true),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+
+
+// ---------------- v6: photo posts, follows ----------------
+
+/** created_at values are kept to whole milliseconds so cursors (ISO strings) compare exactly. */
+const msNow = sql`date_trunc('milliseconds', now())`;
+
+/**
+ * Photo posts. A post starts as a draft (publishedAt null) while its photos are uploaded; drafts older
+ * than 24 h are deleted. On publish, createdAt is set to the publish time (lists sort by it).
+ */
+export const posts = pgTable(
+  'posts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    authorId: uuid('author_id')
+      .notNull()
+      .references((): AnyPgColumn => users.id, { onDelete: 'cascade' }),
+    caption: text('caption').notNull().default(''),
+    carId: uuid('car_id').references((): AnyPgColumn => cars.id, { onDelete: 'set null' }),
+    spotId: uuid('spot_id').references((): AnyPgColumn => spots.id, { onDelete: 'set null' }),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(msNow),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('posts_published_created_idx').on(t.createdAt.desc(), t.id.desc()).where(sql`${t.publishedAt} is not null`),
+    index('posts_author_created_idx').on(t.authorId, t.createdAt.desc(), t.id.desc()),
+    index('posts_spot_created_idx').on(t.spotId, t.createdAt.desc(), t.id.desc()).where(sql`${t.spotId} is not null`),
+    index('posts_car_created_idx').on(t.carId, t.createdAt.desc(), t.id.desc()).where(sql`${t.carId} is not null`),
+    index('posts_drafts_idx').on(t.createdAt).where(sql`${t.publishedAt} is null`),
+  ],
+);
+
+/** Photos of a post, in order (idx 0..5). The image row itself carries post_id for cleanup. */
+export const postPhotos = pgTable(
+  'post_photos',
+  {
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    idx: smallint('idx').notNull(),
+    imageId: uuid('image_id')
+      .notNull()
+      .references(() => images.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.postId, t.idx] }),
+    uniqueIndex('post_photos_image_idx').on(t.imageId),
+    check('post_photos_idx_check', sql`${t.idx} between 0 and 5`),
+  ],
+);
+
+export const postLikes = pgTable(
+  'post_likes',
+  {
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(msNow),
+  },
+  (t) => [primaryKey({ columns: [t.postId, t.userId] }), index('post_likes_user_idx').on(t.userId)],
+);
+
+export const postSaves = pgTable(
+  'post_saves',
+  {
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(msNow),
+  },
+  (t) => [
+    primaryKey({ columns: [t.postId, t.userId] }),
+    index('post_saves_user_created_idx').on(t.userId, t.createdAt.desc(), t.postId.desc()),
+  ],
+);
+
+export const postComments = pgTable(
+  'post_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(msNow),
+  },
+  (t) => [
+    index('post_comments_post_created_idx').on(t.postId, t.createdAt, t.id),
+    index('post_comments_author_idx').on(t.authorId),
+  ],
+);
+
+/** Who follows whom (no approval). "Friends" (Dost) = following each other. */
+export const follows = pgTable(
+  'follows',
+  {
+    followerId: uuid('follower_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    followeeId: uuid('followee_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(msNow),
+  },
+  (t) => [
+    primaryKey({ columns: [t.followerId, t.followeeId] }),
+    index('follows_followee_created_idx').on(t.followeeId, t.createdAt.desc(), t.followerId.desc()),
+    index('follows_follower_created_idx').on(t.followerId, t.createdAt.desc(), t.followeeId.desc()),
+    check('follows_not_self', sql`${t.followerId} <> ${t.followeeId}`),
+  ],
+);
+
+/** When the user last looked at their followers (badge = followers since then). No row = never. */
+export const followersSeen = pgTable('followers_seen', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  seenAt: timestamp('seen_at', { withTimezone: true }).notNull().defaultNow(),
 });

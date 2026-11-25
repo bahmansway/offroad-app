@@ -10,6 +10,7 @@ import { isForeignKeyViolation, privateUser, userRef, userRefCols } from '../lib
 import { loadCarSummaries } from './cars.js';
 import { clanTitle } from './clans.js';
 import { cutTies, friendFields, lockPair } from '../lib/friends.js';
+import { followFields } from '../lib/follows.js';
 
 const optText = (max: number) =>
   z
@@ -165,6 +166,7 @@ export async function profileRoutes(app: FastifyInstance) {
       clan: await userClan(db, id),
       isBlocked,
       ...(await friendFields(db, req.userId, id)),
+      ...(await followFields(db, req.userId, id)),
     };
   });
 
@@ -178,7 +180,7 @@ export async function profileRoutes(app: FastifyInstance) {
       // same lock as friend requests / accepts, so a block can't interleave with them
       await lockPair(tx, req.userId!, id);
       await tx.insert(blocks).values({ blockerId: req.userId!, blockedId: id }).onConflictDoNothing();
-      // blocking ends the friendship and drops pending requests both ways
+      // blocking ends the friendship, drops pending requests and (v6) follows both ways
       await cutTies(tx, req.userId!, id);
     });
     return reply.status(204).send();

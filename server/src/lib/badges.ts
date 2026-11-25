@@ -3,9 +3,13 @@ import { chatClosedSql } from './eventState.js';
 import { clanInvites } from '../db/schema.js';
 import type { Db } from '../db/index.js';
 import { incomingRequestCount } from './friends.js';
+import { newFollowerCount } from './follows.js';
 import { unreadTotal } from '../routes/chat.js';
 
-/** Tab badges: unread messages, pending incoming friend requests, pending clan invites. */
+/**
+ * Tab badges: unread messages, pending clan invites, new followers since last viewed (v6). `friendRequests`
+ * (pending incoming, deprecated) stays for older app versions.
+ */
 export async function badgeCounts(db: Db, me: string) {
   const [inv] = await db
     .select({ n: sql<number>`count(*)::int` })
@@ -15,13 +19,14 @@ export async function badgeCounts(db: Db, me: string) {
     messages: await unreadTotal(db, me),
     friendRequests: await incomingRequestCount(db, me),
     clanInvites: inv.n,
+    newFollowers: await newFollowerCount(db, me),
   };
 }
 
 /**
  * App icon numbers for many users in ONE query (push sending). Same rules as `badgeCounts`:
  * unread (not muted, not deleted, not my own, sender not blocked by me, event chat not closed)
- * + incoming friend requests (no block either way) + pending, unexpired clan invites.
+ * + new followers since last viewed (no block either way; v6, replaces friend requests) + pending, unexpired clan invites.
  */
 export async function appBadges(db: Db, userIds: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
@@ -41,9 +46,10 @@ export async function appBadges(db: Db, userIds: string[]): Promise<Map<string, 
           and (m.sender_id is null or m.sender_id not in (select blocked_id from blocks where blocker_id = u.id))
           and m.created_at > cm.last_read_at
           and (c.type <> 'event' or not (${chatClosedSql('events')})))
-      + (select count(*) from friend_requests fr
-          where fr.to_id = u.id and fr.declined_at is null
-            and not exists (select 1 from blocks b where (b.blocker_id = u.id and b.blocked_id = fr.from_id) or (b.blocker_id = fr.from_id and b.blocked_id = u.id)))
+      + (select count(*) from follows f
+          where f.followee_id = u.id
+            and f.created_at > coalesce((select s.seen_at from followers_seen s where s.user_id = u.id), '-infinity'::timestamptz)
+            and not exists (select 1 from blocks b where (b.blocker_id = u.id and b.blocked_id = f.follower_id) or (b.blocker_id = f.follower_id and b.blocked_id = u.id)))
       + (select count(*) from clan_invites ci where ci.user_id = u.id and ci.declined_at is null and ci.expires_at > now())
     )::int as n
     from u`);

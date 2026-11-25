@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { friendRequests, friendships, users } from '../db/schema.js';
 import { notFound } from './errors.js';
 import type { Db, Tx } from '../db/index.js';
+import { cutFollows } from './follows.js';
 
 export const MAX_FRIENDS = 1000;
 export const MAX_PENDING_OUTGOING = 50;
@@ -84,7 +85,7 @@ export async function friendFields(db: Db, viewer: string | null, other: string)
   };
 }
 
-/** Remove a friendship (both rows) and any requests between two users, e.g. when one blocks the other. */
+/** Remove a friendship (both rows), any requests and (v6) follows both ways between two users, e.g. when one blocks the other. */
 export async function cutTies(db: Db | Tx, a: string, b: string) {
   await db
     .delete(friendships)
@@ -102,6 +103,7 @@ export async function cutTies(db: Db | Tx, a: string, b: string) {
         and(eq(friendRequests.fromId, b), eq(friendRequests.toId, a)),
       ),
     );
+  await cutFollows(db, a, b);
 }
 
 /** Pending incoming requests (badge), not counting users either side blocked. */

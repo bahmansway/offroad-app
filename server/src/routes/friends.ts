@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, isNull, sql } from 'drizzle-orm';
-import { friendRequests, friendships, users } from '../db/schema.js';
+import { follows, friendRequests, friendships, users } from '../db/schema.js';
 import type { Db, Tx } from '../db/index.js';
 import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
 import { makeLimiter } from '../lib/limits.js';
@@ -17,6 +17,7 @@ import {
   lockPair,
 } from '../lib/friends.js';
 import { badgeCounts } from '../lib/badges.js';
+import { addFollows, cutFollows } from '../lib/follows.js';
 
 type ReqRow = typeof friendRequests.$inferSelect;
 
@@ -44,6 +45,11 @@ async function makeFriends(tx: Tx, a: string, b: string) {
       { userId: b, friendId: a },
     ])
     .onConflictDoNothing();
+  // v6: friends = mutual follows (the friends endpoints are deprecated but keep both in sync)
+  await addFollows(tx, [
+    { follower: a, followee: b },
+    { follower: b, followee: a },
+  ]);
 }
 
 export async function friendRoutes(app: FastifyInstance) {
@@ -100,6 +106,8 @@ export async function friendRoutes(app: FastifyInstance) {
       if (n.n >= MAX_PENDING_OUTGOING) throw conflict(`At most ${MAX_PENDING_OUTGOING} pending friend requests`);
       if ((await friendCount(tx, me)) >= MAX_FRIENDS) throw conflict(`At most ${MAX_FRIENDS} friends`);
       const [row] = await tx.insert(friendRequests).values({ fromId: me, toId: userId }).returning();
+      // v6: a friend request is a follow from the requester
+      await addFollows(tx, [{ follower: me, followee: userId }]);
       return { accepted: false as const, request: row };
     });
     const user = await refOf(db, userId);
@@ -193,8 +201,10 @@ export async function friendRoutes(app: FastifyInstance) {
     const del = await db
       .delete(friendRequests)
       .where(and(eq(friendRequests.id, id), eq(friendRequests.fromId, req.userId!), isNull(friendRequests.declinedAt)))
-      .returning({ id: friendRequests.id });
+      .returning({ id: friendRequests.id, toId: friendRequests.toId });
     if (!del.length) throw notFound('Friend request not found');
+    // v6: cancelling the request also takes back the follow it created
+    await db.delete(follows).where(and(eq(follows.followerId, req.userId!), eq(follows.followeeId, del[0].toId)));
     return reply.status(204).send();
   });
 
@@ -223,6 +233,8 @@ export async function friendRoutes(app: FastifyInstance) {
     await db.delete(friendships).where(
       sql`(${friendships.userId} = ${me} and ${friendships.friendId} = ${other}) or (${friendships.userId} = ${other} and ${friendships.friendId} = ${me})`,
     );
+    // v6: unfriend (old app) = no longer following each other
+    await cutFollows(db, me, other);
     return reply.status(204).send();
   });
 

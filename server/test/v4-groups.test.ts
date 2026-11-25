@@ -29,8 +29,9 @@ function connect(token: string): Promise<Socket> {
     s.on('connect_error', reject);
   });
 }
+/** v6: group adds need a mutual follow ("Dost"). */
 async function befriend(a: string, b: string) {
-  await sql.query(`insert into friendships (user_id, friend_id) values ($1, $2), ($2, $1) on conflict do nothing`, [a, b]);
+  await sql.query(`insert into follows (follower_id, followee_id) values ($1, $2), ($2, $1) on conflict do nothing`, [a, b]);
 }
 const send = (u: U, convId: string, text: string) => req('POST', `/api/conversations/${convId}/messages`, u, { text });
 const messages = async (u: U, convId: string) => (await req('GET', `/api/conversations/${convId}/messages`, u)).json().items;

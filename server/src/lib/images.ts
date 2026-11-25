@@ -8,13 +8,15 @@ import { AppError, badRequest, conflict } from './errors.js';
 sharp.concurrency(1);
 
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
-/** Total stored (re-encoded) image bytes per user. */
-export const USER_IMAGE_QUOTA_BYTES = 20 * 1024 * 1024;
+/** Total stored (re-encoded) image bytes per user, post photos included (v6: 200 MB). */
+export const USER_IMAGE_QUOTA_MB = 200;
+export const USER_IMAGE_QUOTA_BYTES = USER_IMAGE_QUOTA_MB * 1024 * 1024;
 /** Content types accepted for upload bodies. The real type is always sniffed from the bytes. */
 export const UPLOAD_CONTENT_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/octet-stream'];
 
-export type ImageKind = 'avatar' | 'car' | 'clan' | 'event' | 'group';
-const MAX_SIDE: Record<ImageKind, number> = { avatar: 512, car: 1024, clan: 512, event: 1024, group: 512 };
+export type ImageKind = 'avatar' | 'car' | 'clan' | 'event' | 'group' | 'post';
+const MAX_SIDE: Record<ImageKind, number> = { avatar: 512, car: 1024, clan: 512, event: 1024, group: 512, post: 1440 };
+const QUALITY: Partial<Record<ImageKind, number>> = { post: 80 };
 
 export const imageUrl = (id: string | null | undefined) => (id ? `/api/images/${id}` : null);
 
@@ -47,7 +49,7 @@ export async function processImage(input: unknown, kind: ImageKind) {
       .rotate()
       .resize({ width: max, height: max, fit: 'inside', withoutEnlargement: true })
       .flatten({ background: '#ffffff' })
-      .jpeg({ quality: 82, mozjpeg: true })
+      .jpeg({ quality: QUALITY[kind] ?? 82, mozjpeg: true })
       .toBuffer({ resolveWithObject: true });
     return { data, width: info.width, height: info.height };
   } catch (err) {
@@ -71,17 +73,18 @@ export async function saveImage(
   kind: ImageKind,
   p: Awaited<ReturnType<typeof processImage>>,
   replacing?: string | null,
+  postId?: string,
 ) {
   const [used] = await db
     .select({ n: sql<number>`coalesce(sum(${images.bytes}), 0)::int` })
     .from(images)
     .where(replacing ? sql`${images.ownerId} = ${ownerId} and ${images.id} <> ${replacing}` : eq(images.ownerId, ownerId));
   if (used.n + p.data.length > USER_IMAGE_QUOTA_BYTES) {
-    throw conflict('Photo storage limit reached (20 MB). Remove some photos first.');
+    throw conflict(`Photo storage limit reached (${USER_IMAGE_QUOTA_MB} MB). Remove some photos first.`);
   }
   const [row] = await db
     .insert(images)
-    .values({ ownerId, kind, width: p.width, height: p.height, bytes: p.data.length, data: p.data })
+    .values({ ownerId, kind, postId: postId ?? null, width: p.width, height: p.height, bytes: p.data.length, data: p.data })
     .returning({ id: images.id });
   return row.id;
 }
