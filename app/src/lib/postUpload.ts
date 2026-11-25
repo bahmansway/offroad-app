@@ -130,6 +130,11 @@ export async function discardDraft(st: UploadState, del: (id: Id) => Promise<voi
   if (!st.draftId || st.post) return 'none';
   const id = st.draftId;
   try {
+    // If publish reached the server but its answer was lost, don't delete the published post.
+    if (del === api.deletePost) {
+      const p = await api.post(id).catch(() => null);
+      if (p && p.status === 'published') return 'none';
+    }
     await del(id);
     return 'deleted';
   } catch (e) {
