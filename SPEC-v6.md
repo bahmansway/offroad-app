@@ -8,7 +8,7 @@ Events move out of the tab bar: reachable from Home ("Tədbirlər" row/section +
 
 ## 1. Photo posts (Instagram-like, simple)
 - Post: `{id, author: UserSummary, photos: Photo[] (1–6, order kept), caption (≤1000), car: CarSummary|null (author's own car only), spot: SpotSummary|null (any visible spot; optional "assign to a road"), likeCount, commentCount, likedByMe, savedByMe, createdAt, editedAt}`.
-- Upload: same image pipeline (re-encode JPEG, strip EXIF/GPS, max 1440 px long side, quality ~0.8), stored in Postgres like other images. Per-user photo quota raised to 200 MB total (posts included). Rate: 20 posts/day, 60 photos/day.
+- Upload: same image pipeline (re-encode JPEG, strip EXIF/GPS, max 1440 px long side, quality ~0.8), stored in Postgres like other images. Per-user photo quota 50 MB total (posts included). Rate: 20 posts/day, 60 photos/day.
 - Endpoints: `POST /api/posts` (multipart-free: create post first with caption/car/spot, then `PUT /api/posts/:id/photos/:index` raw image bodies, then `POST /api/posts/:id/publish`; unpublished drafts older than 24 h are deleted), `GET /api/posts/:id`, `PATCH /api/posts/:id {caption, carId, spotId}` (author), `DELETE /api/posts/:id` (author), `POST/DELETE /api/posts/:id/like`, `POST/DELETE /api/posts/:id/save`, `GET /api/posts/:id/comments?cursor`, `POST /api/posts/:id/comments {text ≤500}`, `DELETE /api/comments/:id` (author of comment or of post).
 - Lists: `GET /api/feed?cursor` (Home — posts from people I follow + my own, newest first; if I follow < 3 people, append "suggested" recent public posts flagged `suggested:true`), `GET /api/users/:id/posts?cursor`, `GET /api/me/saved?cursor`, `GET /api/spots/:id/posts?cursor`, `GET /api/cars/:id/posts?cursor`.
 - Blocks: hidden both ways everywhere (feed, lists, comments, likes). Reports accept targetType `post` and `comment`.
@@ -112,17 +112,19 @@ Only the details and additions beyond the spec above. All v2–v5 notes still ap
 
 **Reports**: `POST /api/reports` accepts `targetType: 'post'` and `'comment'`. Things you can't see (drafts, blocked) give 404.
 
-**Leaderboard**: `breakdown` gains `posts`. +3 per published post with at least one photo, max 10 posts per Baku month, counted at publish time. Deleted posts lose their points. Add this to the "Xallar necə qazanılır?" sheet.
+**Leaderboard**: `breakdown` gains `posts`. +3 per published post with at least one photo, max 10 posts per Baku month, counted at publish time. Deleted posts lose their points, and so do posts reported by 2 or more different users (same rule as spots). Add this to the "Xallar necə qazanılır?" sheet.
 
 **Limits**
-- Photo storage per user is now 200 MB (post photos included). Over it: 409 "Photo storage limit reached (200 MB)...".
+- Photo storage per user is now 50 MB for now (post photos included; about 300 post photos). Over it: 409 "Photo storage limit reached (50 MB)...". One user's uploads (avatar, car, clan logo, event cover, group photo, post photos) are checked one at a time, so uploads at the same moment can't go over it.
+- The server logs one line with the total photo storage (MB stored, MB on disk, photo count) at startup and every 24 h.
 - 20 posts per 24 h and 60 post photo uploads per 24 h per user (429 with `Retry-After`). Env `RATE_LIMIT_POSTS`, `RATE_LIMIT_POST_PHOTOS`.
 - Likes + saves: 300 per hour. Comments: 60 per hour.
 
 **Share links**: `/p/:id`, `/spot/:id`, `/event/:id` are served the web app (index.html) by the server; the app needs routes for them.
 
 **Old friends endpoints (deprecated, still working for one release)**
-- They stay in sync with follows: a friend request follows the other person, accept / auto-accept makes it mutual, cancel removes that follow, unfriend removes the follows both ways. Decline leaves the requester's follow (follows need no approval).
+- They stay in sync with follows: a friend request follows the other person, accept / auto-accept makes it mutual, cancel removes that follow (a follow that existed before the request stays), unfriend removes the follows both ways. Decline leaves the requester's follow (follows need no approval).
+- Request and accept also respect the 5000 following limit (409).
 
 **Database**
 - Migration `server/drizzle/0007_v6_posts_follows.sql` only adds things: tables `posts`, `post_photos`, `post_likes`, `post_saves`, `post_comments`, `follows`, `followers_seen`; nullable `images.post_id` (photos are deleted with their post); `notification_settings.social` (default true).

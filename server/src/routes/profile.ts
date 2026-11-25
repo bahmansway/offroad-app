@@ -109,12 +109,19 @@ export async function profileRoutes(app: FastifyInstance) {
 
   // ---- avatar: raw image body (image/jpeg|png|webp), max 2 MB ----
   app.put('/me/avatar', uploadOpts, async (req) => {
-    const [u] = await db.select({ old: users.avatarImageId }).from(users).where(eq(users.id, req.userId!)).limit(1);
-    if (!u) throw unauthorized();
-    const id = await storeImage(db, req.userId!, 'avatar', req.body, u.old);
-    await db.update(users).set({ avatarImageId: id }).where(eq(users.id, req.userId!));
-    await deleteImage(db, u.old);
-    return { avatarUrl: imageUrl(id) };
+    const me = req.userId!;
+    const { imageId, old } = await storeImage(db, me, 'avatar', req.body, {
+      current: async (tx) => {
+        const [u] = await tx.select({ old: users.avatarImageId }).from(users).where(eq(users.id, me)).for('no key update').limit(1);
+        if (!u) throw unauthorized();
+        return u.old;
+      },
+      apply: async (tx, id) => {
+        await tx.update(users).set({ avatarImageId: id }).where(eq(users.id, me));
+      },
+    });
+    await deleteImage(db, old);
+    return { avatarUrl: imageUrl(imageId) };
   });
 
   app.delete('/me/avatar', { preHandler: app.authenticate }, async (req, reply) => {

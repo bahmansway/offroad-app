@@ -8,8 +8,8 @@ import { AppError, badRequest, conflict } from './errors.js';
 sharp.concurrency(1);
 
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
-/** Total stored (re-encoded) image bytes per user, post photos included (v6: 200 MB). */
-export const USER_IMAGE_QUOTA_MB = 200;
+/** Total stored (re-encoded) image bytes per user, post photos included (v6: 50 MB for now, Railway disk cost). */
+export const USER_IMAGE_QUOTA_MB = 50;
 export const USER_IMAGE_QUOTA_BYTES = USER_IMAGE_QUOTA_MB * 1024 * 1024;
 /** Content types accepted for upload bodies. The real type is always sniffed from the bytes. */
 export const UPLOAD_CONTENT_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/octet-stream'];
@@ -59,34 +59,73 @@ export async function processImage(input: unknown, kind: ImageKind) {
 }
 
 /**
- * Process and save an image. `replacing` is the image id this upload will replace (its bytes don't
- * count against the quota).
+ * Process and save an image for one owner, all in one transaction (resizing happens before it).
+ * `current` reads (and should lock) the record whose image is replaced and returns that image id (its
+ * bytes don't count against the quota), `apply` points the owner's record at the new image. Returns the new id and the old one,
+ * which the caller deletes afterwards.
  */
-export async function storeImage(db: Db, ownerId: string, kind: ImageKind, body: unknown, replacing?: string | null) {
-  return saveImage(db, ownerId, kind, await processImage(body, kind), replacing);
+export async function storeImage(
+  db: Db,
+  ownerId: string,
+  kind: ImageKind,
+  body: unknown,
+  opts: { current: (tx: Tx) => Promise<string | null>; apply: (tx: Tx, imageId: string) => Promise<void> },
+) {
+  const processed = await processImage(body, kind);
+  return db.transaction(async (tx) => {
+    // the record being changed is read (and locked) first, then the owner: same lock order as deletes
+    const old = await opts.current(tx);
+    const imageId = await saveImage(tx, ownerId, kind, processed, old);
+    await opts.apply(tx, imageId);
+    return { imageId, old };
+  });
 }
 
-/** Quota check + insert of an already processed image. Works inside a transaction too. */
+/**
+ * Lock the owner's user row so one user's uploads are checked against the quota one at a time
+ * (avatar, car, clan logo, event cover, group photo and post photos at the same moment can't pass the
+ * check together). Locking twice in the same transaction is fine. Lock order everywhere: the record
+ * (car, post, event, group) first, then the owner.
+ */
+async function lockOwner(tx: Tx, ownerId: string) {
+  // NO KEY UPDATE: serializes uploads of one user but doesn't block inserts that only reference the user
+  await tx.execute(sql`select id from users where id = ${ownerId} for no key update`);
+}
+
+/**
+ * Quota check + insert of an already processed image. Needs a transaction: it takes the owner's lock,
+ * which is held until that transaction ends.
+ */
 export async function saveImage(
-  db: Db | Tx,
+  tx: Tx,
   ownerId: string,
   kind: ImageKind,
   p: Awaited<ReturnType<typeof processImage>>,
   replacing?: string | null,
   postId?: string,
 ) {
-  const [used] = await db
-    .select({ n: sql<number>`coalesce(sum(${images.bytes}), 0)::int` })
+  await lockOwner(tx, ownerId);
+  const [used] = await tx
+    .select({ n: sql<number>`coalesce(sum(${images.bytes}), 0)::bigint` })
     .from(images)
     .where(replacing ? sql`${images.ownerId} = ${ownerId} and ${images.id} <> ${replacing}` : eq(images.ownerId, ownerId));
-  if (used.n + p.data.length > USER_IMAGE_QUOTA_BYTES) {
+  if (Number(used.n) + p.data.length > USER_IMAGE_QUOTA_BYTES) {
     throw conflict(`Photo storage limit reached (${USER_IMAGE_QUOTA_MB} MB). Remove some photos first.`);
   }
-  const [row] = await db
+  const [row] = await tx
     .insert(images)
     .values({ ownerId, kind, postId: postId ?? null, width: p.width, height: p.height, bytes: p.data.length, data: p.data })
     .returning({ id: images.id });
   return row.id;
+}
+
+/** Total photo storage: stored (re-encoded) bytes and the table's size on disk, in MB. */
+export async function imageStorageMb(db: Db) {
+  const r = await db.execute<{ stored: string; disk: string; count: string }>(sql`
+    select coalesce(sum(bytes), 0)::bigint as stored, count(*)::bigint as count,
+      pg_total_relation_size('images')::bigint as disk from images`);
+  const mb = (n: string) => Math.round((Number(n) / 1024 / 1024) * 10) / 10;
+  return { storedMb: mb(r.rows[0].stored), diskMb: mb(r.rows[0].disk), count: Number(r.rows[0].count) };
 }
 
 export async function deleteImage(db: Db, id: string | null | undefined) {

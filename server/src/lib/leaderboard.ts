@@ -13,7 +13,8 @@ import { DEFAULT_EVENT_LENGTH_MS } from './eventState.js';
  *   >= 2 cars going. Counted when the event ends.
  * - car with a photo: 5, only the user's first 2 such cars (by creation time)
  * - rating given (spot or car, not on your own spot): 1, max 20 a month
- * - v6: photo post shared: 3, max 10 a month (counted when published; deleted posts don't count)
+ * - v6: photo post shared: 3, max 10 a month (counted when published; deleted posts and posts reported by
+ *   2+ different users don't count)
  */
 export const POINTS = { spot: 10, organized: 15, attended: 5, car: 5, rating: 1, post: 3 } as const;
 export const MAX_CARS_COUNTED = 2;
@@ -21,7 +22,7 @@ export const MAX_CARS_COUNTED = 2;
 export const MONTHLY_CAPS = { spots: 10, events: 4, attended: 8, ratings: 20, posts: 10 } as const;
 /** A spot counts only once it is this old and nobody has reported it. */
 export const SPOT_MIN_AGE_HOURS = 24;
-/** A spot loses its points once this many different users reported it (one rival's report is not enough). */
+/** A spot (v6: or a post) loses its points once this many different users reported it (one rival's report is not enough). */
 export const SPOT_REPORTERS_TO_DROP = 2;
 /** Events earn points only if they lasted at least this long and had this many cars going. */
 export const MIN_EVENT_MINUTES = 60;
@@ -104,6 +105,7 @@ export async function computeRanking(db: Db, period: Period, now = new Date()): 
       from posts p
       where p.published_at is not null and ${inRange(sql.raw('p.created_at'))}
         and exists (select 1 from post_photos ph where ph.post_id = p.id)
+        and (select count(distinct r.reporter_id) from reports r where r.target_type = 'post' and r.target_id = p.id) < ${sql.raw(String(SPOT_REPORTERS_TO_DROP))}
     ),
     capped as (
       -- monthly caps per kind (Baku months); the range filter above is month-aligned, so filtering first is safe

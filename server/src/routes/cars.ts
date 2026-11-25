@@ -276,10 +276,20 @@ export async function carRoutes(app: FastifyInstance) {
   // ---- car photo (raw image body, see lib/images.ts) ----
   app.put('/cars/:id/photo', { bodyLimit: MAX_UPLOAD_BYTES, preHandler: [app.authenticate, photoLimit] }, async (req) => {
     const id = idParam(req.params);
-    const c = await loadOwnedCar(id, req.userId!);
-    const imageId = await storeImage(db, req.userId!, 'car', req.body, c.photoImageId);
-    await db.update(cars).set({ photoImageId: imageId }).where(eq(cars.id, id));
-    await deleteImage(db, c.photoImageId);
+    const me = req.userId!;
+    await loadOwnedCar(id, me); // cheap checks before resizing
+    const { imageId, old } = await storeImage(db, me, 'car', req.body, {
+      current: async (tx) => {
+        const [c] = await tx.select().from(cars).where(eq(cars.id, id)).for('update').limit(1);
+        if (!c) throw notFound('Car not found');
+        if (c.ownerId !== me) throw forbidden('You can only change your own cars');
+        return c.photoImageId;
+      },
+      apply: async (tx, imageId) => {
+        await tx.update(cars).set({ photoImageId: imageId }).where(eq(cars.id, id));
+      },
+    });
+    await deleteImage(db, old);
     return { photoUrl: imageUrl(imageId) };
   });
 

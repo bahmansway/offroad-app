@@ -2,13 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
 import { follows, users } from '../db/schema.js';
-import { badRequest, conflict, forbidden, idParam, notFound, parse } from '../lib/errors.js';
+import { badRequest, forbidden, idParam, notFound, parse } from '../lib/errors.js';
 import { makeLimiter } from '../lib/limits.js';
 import { eitherBlocked } from '../lib/users.js';
 import { imageUrl } from '../lib/images.js';
 import { likePattern, lockPair } from '../lib/friends.js';
 import {
-  MAX_FOLLOWING,
+  checkFollowLimit,
   decodeCursor,
   encodeCursor,
   cursorId,
@@ -51,8 +51,7 @@ export async function followRoutes(app: FastifyInstance) {
       await lockPair(tx, me, id);
       if (await eitherBlocked(tx, me, id)) throw forbidden('You cannot follow this user');
       if (await isFollowing(tx, me, id)) return false;
-      const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(follows).where(eq(follows.followerId, me));
-      if (n.n >= MAX_FOLLOWING) throw conflict(`You can follow at most ${MAX_FOLLOWING} people`);
+      await checkFollowLimit(tx, me, id);
       await tx.insert(follows).values({ followerId: me, followeeId: id }).onConflictDoNothing();
       return true;
     });

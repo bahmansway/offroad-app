@@ -299,10 +299,20 @@ export async function clanRoutes(app: FastifyInstance) {
 
   app.put('/clans/:id/logo', { bodyLimit: MAX_UPLOAD_BYTES, preHandler: [app.authenticate, logoLimit] }, async (req) => {
     const id = idParam(req.params);
-    const c = await loadLed(id, req.userId!);
-    const imageId = await storeImage(db, req.userId!, 'clan', req.body, c.logoImageId);
-    await db.update(clans).set({ logoImageId: imageId }).where(eq(clans.id, id));
-    await deleteImage(db, c.logoImageId);
+    const me = req.userId!;
+    await loadLed(id, me); // cheap checks before resizing
+    const { imageId, old } = await storeImage(db, me, 'clan', req.body, {
+      current: async (tx) => {
+        const [c] = await tx.select({ leaderId: clans.leaderId, logo: clans.logoImageId }).from(clans).where(eq(clans.id, id)).limit(1);
+        if (!c) throw notFound('Clan not found');
+        if (c.leaderId !== me) throw forbidden('Only the clan leader can do this');
+        return c.logo;
+      },
+      apply: async (tx, imageId) => {
+        await tx.update(clans).set({ logoImageId: imageId }).where(eq(clans.id, id));
+      },
+    });
+    await deleteImage(db, old);
     return { logoUrl: imageUrl(imageId) };
   });
 

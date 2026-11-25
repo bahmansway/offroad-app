@@ -1,10 +1,17 @@
 import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { follows, followersSeen, posts } from '../db/schema.js';
 import type { Db, Tx } from '../db/index.js';
-import { badRequest } from './errors.js';
+import { badRequest, conflict } from './errors.js';
 
 /** Most people one user can follow. */
 export const MAX_FOLLOWING = 5000;
+
+/** 409 when `follower` doesn't follow `followee` yet and already follows the maximum number of people. */
+export async function checkFollowLimit(db: Db | Tx, follower: string, followee: string) {
+  if (await isFollowing(db, follower, followee)) return;
+  const [n] = await db.select({ n: sql<number>`count(*)::int` }).from(follows).where(eq(follows.followerId, follower));
+  if (n.n >= MAX_FOLLOWING) throw conflict(`You can follow at most ${MAX_FOLLOWING} people`);
+}
 
 /** Insert follows (idempotent). Self-follows are ignored. */
 export async function addFollows(db: Db | Tx, pairs: { follower: string; followee: string }[]) {

@@ -254,18 +254,18 @@ describe('limits', () => {
     expect(r.json().error.code).toBe('CONFLICT');
   });
 
-  it('200 MB stored image quota per user; replacing a photo does not double-count', async () => {
+  it('50 MB stored image quota per user; replacing a photo does not double-count', async () => {
     const u = await register(app, 'Photographer');
     const pool = (app as any).db.$client;
     // pretend the user already stores 19.9 MB
-    await pool.query("insert into images (owner_id, kind, width, height, bytes, data) values ($1, 'car', 1, 1, $2, '\\x00')", [u.user.id, 200 * 1024 * 1024 - 1024]);
+    await pool.query("insert into images (owner_id, kind, width, height, bytes, data) values ($1, 'car', 1, 1, $2, '\\x00')", [u.user.id, 50 * 1024 * 1024 - 1024]);
     const img = await noisePng(300, 300); // re-encoded JPEG is > 100 KB
     const h = { ...u.auth, 'content-type': 'image/png' };
     const r = await app.inject({ method: 'PUT', url: '/api/me/avatar', headers: h, payload: img });
     expect(r.statusCode, r.body).toBe(409);
-    expect(r.json().error.message).toMatch(/200 MB/);
+    expect(r.json().error.message).toMatch(/50 MB/);
     await pool.query('delete from images where owner_id = $1', [u.user.id]);
-    await pool.query("insert into images (owner_id, kind, width, height, bytes, data) values ($1, 'car', 1, 1, $2, '\\x00')", [u.user.id, 200 * 1024 * 1024 - 600 * 1024]);
+    await pool.query("insert into images (owner_id, kind, width, height, bytes, data) values ($1, 'car', 1, 1, $2, '\\x00')", [u.user.id, 50 * 1024 * 1024 - 600 * 1024]);
     const first = await app.inject({ method: 'PUT', url: '/api/me/avatar', headers: h, payload: img });
     expect(first.statusCode, first.body).toBe(200);
     // replacing the avatar: old avatar's bytes are excluded from the count

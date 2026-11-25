@@ -8,9 +8,10 @@ import pg from 'pg';
 import sharp from 'sharp';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { makeApp, register, resetDb, TEST_DB_URL } from './helpers.js';
+import { makeApp, noisePng, register, resetDb, TEST_DB_URL } from './helpers.js';
 import { MIGRATIONS_DIR } from '../src/db/migrate.js';
 import { cleanupDrafts } from '../src/lib/posts.js';
+import { imageStorageMb, USER_IMAGE_QUOTA_BYTES } from '../src/lib/images.js';
 import { computeRanking } from '../src/lib/leaderboard.js';
 import { removeDemo, DEMO_EMAIL_DOMAIN } from '../src/seedDemo.js';
 
@@ -621,14 +622,14 @@ describe('feed: suggested fallback and stable cursor pagination', () => {
 });
 
 describe('storage quota, rate limits, leaderboard', () => {
-  it('post photos count toward the 200 MB quota', async () => {
+  it('post photos count toward the 50 MB quota', async () => {
     const u = await register(app, 'Quota');
-    await sql.query("insert into images (owner_id, kind, width, height, bytes, data) values ($1, 'car', 1, 1, $2, '\\x00')", [u.user.id, 200 * 1024 * 1024 - 100]);
+    await sql.query("insert into images (owner_id, kind, width, height, bytes, data) values ($1, 'car', 1, 1, $2, '\\x00')", [u.user.id, 50 * 1024 * 1024 - 100]);
     const id = (await req('POST', '/api/posts', u, {})).json().id;
     const r = await putPhoto(u, id, 0);
     expect(r.statusCode).toBe(409);
-    expect(r.json().error.message).toMatch(/200 MB/);
-    await sql.query(`update images set bytes = $2 where owner_id = $1 and kind = 'car'`, [u.user.id, 200 * 1024 * 1024 - 200 * 1024]);
+    expect(r.json().error.message).toMatch(/50 MB/);
+    await sql.query(`update images set bytes = $2 where owner_id = $1 and kind = 'car'`, [u.user.id, 50 * 1024 * 1024 - 200 * 1024]);
     expect((await putPhoto(u, id, 0)).statusCode).toBe(200);
     // replacing the same slot does not double-count
     expect((await putPhoto(u, id, 0)).statusCode).toBe(200);
@@ -701,5 +702,103 @@ describe('demo removal includes v6 data', () => {
     const rp = (await req('GET', `/api/posts/${realPost.id}`, real)).json();
     expect(rp).toMatchObject({ likeCount: 0, commentCount: 0 });
     expect((await req('GET', `/api/users/${real.user.id}`)).json()).toMatchObject({ followerCount: 0, followingCount: 0 });
+  });
+});
+
+describe('review fixes', () => {
+  it('mixed uploads at the same moment can not go over the quota (one lock per user)', async () => {
+    const u = await register(app, 'Racer');
+    const friend = await register(app, 'RacerFriend');
+    await follow(u, friend);
+    await follow(friend, u);
+    const png = await noisePng(300, 300);
+    const h = { ...u.auth, 'content-type': 'image/png' };
+    const carId = (await req('POST', '/api/cars', u, { make: 'Lada', model: 'Niva', year: 2010 })).json().id;
+    const clanId = (await req('POST', '/api/clans', u, { name: `Race clan ${Date.now()}`, tag: `R${Date.now() % 10000}`.slice(0, 5), isOpen: true })).json().id;
+    const ev = await req('POST', '/api/events', u, {
+      title: 'Race trip', startsAt: new Date(Date.now() + 3 * 86400000).toISOString(), maxCars: 5, carId,
+      meetingPoint: { lat: 40.4, lng: 49.8, label: 'Baku' },
+    });
+    expect(ev.statusCode, ev.body).toBe(201);
+    const groupId = (await req('POST', '/api/conversations/group', u, { name: 'Race', userIds: [friend.user.id] })).json().id;
+    const postId = (await req('POST', '/api/posts', u, {})).json().id;
+    const uploads = () => [
+      app.inject({ method: 'PUT', url: '/api/me/avatar', headers: h, payload: png }),
+      app.inject({ method: 'PUT', url: `/api/cars/${carId}/photo`, headers: h, payload: png }),
+      app.inject({ method: 'PUT', url: `/api/clans/${clanId}/logo`, headers: h, payload: png }),
+      app.inject({ method: 'PUT', url: `/api/events/${ev.json().id}/cover`, headers: h, payload: png }),
+      app.inject({ method: 'PUT', url: `/api/conversations/${groupId}/avatar`, headers: h, payload: png }),
+      app.inject({ method: 'PUT', url: `/api/posts/${postId}/photos/0`, headers: h, payload: png }),
+    ];
+    // sizes of each kind for this picture, then clear them
+    for (const r of await Promise.all(uploads())) expect(r.statusCode, r.body).toBe(200);
+    const sizes = (await q(`select bytes from images where owner_id = $1`, [u.user.id])).map((r) => Number(r.bytes));
+    expect(sizes).toHaveLength(6);
+    await req('DELETE', '/api/me/avatar', u);
+    await req('DELETE', `/api/cars/${carId}/photo`, u);
+    await req('DELETE', `/api/clans/${clanId}/logo`, u);
+    await req('DELETE', `/api/events/${ev.json().id}/cover`, u);
+    await req('DELETE', `/api/conversations/${groupId}/avatar`, u);
+    await req('DELETE', `/api/posts/${postId}/photos/0`, u);
+    expect(await num(`select count(*) from images where owner_id = $1`, [u.user.id])).toBe(0);
+    // room for exactly one more photo of any kind
+    const free = Math.max(...sizes) + 10;
+    expect(2 * Math.min(...sizes)).toBeGreaterThan(free);
+    await sql.query("insert into images (owner_id, kind, width, height, bytes, data) values ($1, 'car', 1, 1, $2, '\\x00')", [u.user.id, USER_IMAGE_QUOTA_BYTES - free]);
+    const res = await Promise.all(uploads());
+    expect(res.map((r) => r.statusCode).filter((c) => c === 200)).toHaveLength(1);
+    expect(res.map((r) => r.statusCode).filter((c) => c === 409)).toHaveLength(5);
+    expect(await num(`select sum(bytes) from images where owner_id = $1`, [u.user.id])).toBeLessThanOrEqual(USER_IMAGE_QUOTA_BYTES);
+  });
+
+  it('quota is 50 MB; storage size helper for the daily log', async () => {
+    expect(USER_IMAGE_QUOTA_BYTES).toBe(50 * 1024 * 1024);
+    const s = await imageStorageMb(app.db);
+    expect(s.count).toBeGreaterThan(0);
+    expect(s.storedMb).toBeGreaterThan(0);
+    expect(s.diskMb).toBeGreaterThan(0);
+  });
+
+  it('a post reported by 2+ different users loses its points (one reporter, many times, is not enough)', async () => {
+    const author = await register(app, 'Reported');
+    const r1 = await register(app, 'Reporter1');
+    const r2 = await register(app, 'Reporter2');
+    const p = await makePost(author);
+    const pts = async () => (await computeRanking(app.db, 'month')).find((r) => r.userId === author.user.id)?.breakdown.posts ?? 0;
+    expect(await pts()).toBe(3);
+    for (let i = 0; i < 3; i++) await req('POST', '/api/reports', r1, { targetType: 'post', targetId: p.id, reason: 'x' });
+    expect(await pts()).toBe(3);
+    await req('POST', '/api/reports', r2, { targetType: 'post', targetId: p.id, reason: 'x' });
+    expect(await pts()).toBe(0);
+  });
+
+  it('cancelling a friend request keeps a follow that existed before the request', async () => {
+    const a = await register(app, 'Keeper');
+    const b = await register(app, 'Kept');
+    await follow(a, b);
+    await sql.query(`update follows set created_at = now() - interval '1 day' where follower_id = $1`, [a.user.id]);
+    const fr = (await req('POST', '/api/friends/requests', a, { userId: b.user.id })).json();
+    expect((await req('DELETE', `/api/friends/requests/${fr.request.id}`, a)).statusCode).toBe(204);
+    expect((await req('GET', `/api/users/${b.user.id}`, a)).json().isFollowing).toBe(true);
+  });
+
+  it('friend requests and accepts respect the 5000 following limit', async () => {
+    const a = await register(app, 'Busy');
+    const b = await register(app, 'Target');
+    const c = await register(app, 'Asker');
+    await sql.query(`
+      with fresh as (
+        insert into users (email, password_hash, display_name)
+        select 'bulk' || g || '-' || $2 || '@example.com', 'x', 'Bulk' from generate_series(1, 5000) g returning id)
+      insert into follows (follower_id, followee_id) select $1::uuid, id from fresh`, [a.user.id, Date.now()]);
+    let r = await req('POST', '/api/friends/requests', a, { userId: b.user.id });
+    expect(r.statusCode).toBe(409);
+    expect((await follow(a, b)).statusCode).toBe(409);
+    // c asks a: accepting would make a follow one more person
+    const fr = (await req('POST', '/api/friends/requests', c, { userId: a.user.id })).json();
+    r = await req('POST', `/api/friends/requests/${fr.request.id}/accept`, a);
+    expect(r.statusCode).toBe(409);
+    expect(await num(`select count(*) from friendships where user_id = $1`, [a.user.id])).toBe(0);
+    await sql.query(`delete from users where display_name = 'Bulk'`);
   });
 });

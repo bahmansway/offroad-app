@@ -17,7 +17,7 @@ import {
   lockPair,
 } from '../lib/friends.js';
 import { badgeCounts } from '../lib/badges.js';
-import { addFollows, cutFollows } from '../lib/follows.js';
+import { addFollows, checkFollowLimit, cutFollows } from '../lib/follows.js';
 
 type ReqRow = typeof friendRequests.$inferSelect;
 
@@ -46,6 +46,8 @@ async function makeFriends(tx: Tx, a: string, b: string) {
     ])
     .onConflictDoNothing();
   // v6: friends = mutual follows (the friends endpoints are deprecated but keep both in sync)
+  await checkFollowLimit(tx, a, b);
+  await checkFollowLimit(tx, b, a);
   await addFollows(tx, [
     { follower: a, followee: b },
     { follower: b, followee: a },
@@ -107,6 +109,7 @@ export async function friendRoutes(app: FastifyInstance) {
       if ((await friendCount(tx, me)) >= MAX_FRIENDS) throw conflict(`At most ${MAX_FRIENDS} friends`);
       const [row] = await tx.insert(friendRequests).values({ fromId: me, toId: userId }).returning();
       // v6: a friend request is a follow from the requester
+      await checkFollowLimit(tx, me, userId);
       await addFollows(tx, [{ follower: me, followee: userId }]);
       return { accepted: false as const, request: row };
     });
@@ -201,10 +204,19 @@ export async function friendRoutes(app: FastifyInstance) {
     const del = await db
       .delete(friendRequests)
       .where(and(eq(friendRequests.id, id), eq(friendRequests.fromId, req.userId!), isNull(friendRequests.declinedAt)))
-      .returning({ id: friendRequests.id, toId: friendRequests.toId });
+      .returning({ id: friendRequests.id, toId: friendRequests.toId, createdAt: friendRequests.createdAt });
     if (!del.length) throw notFound('Friend request not found');
-    // v6: cancelling the request also takes back the follow it created
-    await db.delete(follows).where(and(eq(follows.followerId, req.userId!), eq(follows.followeeId, del[0].toId)));
+    // v6: cancelling the request also takes back the follow it created, but not an older follow
+    // (follow times are cut to whole milliseconds, so compare with the request time cut the same way)
+    await db
+      .delete(follows)
+      .where(
+        and(
+          eq(follows.followerId, req.userId!),
+          eq(follows.followeeId, del[0].toId),
+          sql`${follows.createdAt} >= date_trunc('milliseconds', ${del[0].createdAt.toISOString()}::timestamptz)`,
+        ),
+      );
     return reply.status(204).send();
   });
 

@@ -26,7 +26,7 @@ import { groupRoutes } from './routes/groups.js';
 import { searchRoutes } from './routes/search.js';
 import { createLeaderboard, type Leaderboard } from './lib/leaderboard.js';
 import { createRealtime, type Realtime } from './lib/realtime.js';
-import { UPLOAD_CONTENT_TYPES } from './lib/images.js';
+import { imageStorageMb, UPLOAD_CONTENT_TYPES } from './lib/images.js';
 import { createPush, type Push } from './lib/push.js';
 import { createNotifier, type Notifier } from './lib/notify.js';
 import { notificationRoutes } from './routes/notifications.js';
@@ -105,6 +105,15 @@ export async function buildApp(config: AppConfig, opts: BuildOptions = {}): Prom
   const draftTimer = setInterval(() => void dropDrafts(), DRAFT_CLEANUP_EVERY_MS);
   draftTimer.unref();
   app.addHook('onClose', async () => clearInterval(draftTimer));
+  // one line a day with the total photo storage, to keep an eye on the Railway disk
+  const logStorage = () =>
+    imageStorageMb(db)
+      .then((s) => app.log.info(s, `image storage: ${s.storedMb} MB stored (${s.count} photos), ${s.diskMb} MB on disk`))
+      .catch((err) => app.log.warn({ err }, 'image storage size check failed'));
+  await logStorage();
+  const storageTimer = setInterval(() => void logStorage(), 24 * 60 * 60 * 1000);
+  storageTimer.unref();
+  app.addHook('onClose', async () => clearInterval(storageTimer));
 
   // ---- errors: always { error: { code, message } } ----
   app.setErrorHandler((err: any, req, reply) => {

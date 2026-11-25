@@ -126,19 +126,24 @@ export async function postRoutes(app: FastifyInstance) {
       const p0 = await own(db, me, id);
       if (p0.publishedAt) throw conflict('Photos can only be added before the post is shared');
       const processed = await processImage(req.body, 'post'); // EXIF/GPS stripped, max 1440 px
-      await db.transaction(async (tx) => {
-        // one upload at a time per user: the storage quota can't be beaten by parallel uploads
-        await tx.execute(sql`select id from users where id = ${me} for update`);
-        const p = await own(tx, me, id, true);
-        if (p.publishedAt) throw conflict('Photos can only be added before the post is shared');
-        const [old] = await tx
-          .select({ imageId: postPhotos.imageId })
-          .from(postPhotos)
-          .where(and(eq(postPhotos.postId, id), eq(postPhotos.idx, idx)));
-        const imageId = await saveImage(tx, me, 'post', processed, old?.imageId ?? null, id);
-        if (old) await tx.delete(images).where(eq(images.id, old.imageId)); // cascades to the old slot row
-        await tx.insert(postPhotos).values({ postId: id, idx, imageId });
-      });
+      try {
+        await db.transaction(async (tx) => {
+          // saveImage takes the owner's lock: the storage quota can't be beaten by parallel uploads
+          const p = await own(tx, me, id, true);
+          if (p.publishedAt) throw conflict('Photos can only be added before the post is shared');
+          const [old] = await tx
+            .select({ imageId: postPhotos.imageId })
+            .from(postPhotos)
+            .where(and(eq(postPhotos.postId, id), eq(postPhotos.idx, idx)));
+          const imageId = await saveImage(tx, me, 'post', processed, old?.imageId ?? null, id);
+          if (old) await tx.delete(images).where(eq(images.id, old.imageId)); // cascades to the old slot row
+          await tx.insert(postPhotos).values({ postId: id, idx, imageId });
+        });
+      } catch (err) {
+        // the draft was deleted (cleanup or by its author) while the photo was being saved
+        if (isForeignKeyViolation(err)) throw notFound('Post not found');
+        throw err;
+      }
       return one(me, id);
     },
   );
