@@ -3,7 +3,8 @@ import { router } from 'expo-router';
 import { EmptyState, ErrorState, FormError, LoadingState, NavScreen, PillButton, TextField } from '../../components/ui';
 import { FriendPicker } from '../../components/FriendPicker';
 import { RequireAuth } from '../../components/RequireAuth';
-import { api } from '../../lib/api';
+import { api, loadMutualFollows } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { errorMessage } from '../../lib/errors';
@@ -20,7 +21,9 @@ export default function NewGroupScreen() {
 function NewGroup() {
   const { t } = useI18n();
   const chat = useChat();
-  const friends = useAsync(() => api.friends(), []);
+  const { user } = useAuth();
+  // v6: friends = people we follow each other with
+  const friends = useAsync(async () => ({ items: user ? await loadMutualFollows(user.id) : [] }), [user?.id]);
   const [name, setName] = useState('');
   const [picked, setPicked] = useState<Id[]>([]);
   const [tried, setTried] = useState(false);

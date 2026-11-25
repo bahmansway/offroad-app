@@ -44,6 +44,8 @@ function AppStack() {
         <Stack.Screen name="leaderboard-info" options={sheet} />
         <Stack.Screen name="chat/add-members/[id]" options={sheet} />
         <Stack.Screen name="notifications-intro" options={sheet} />
+        <Stack.Screen name="post/edit/[id]" options={sheet} />
+        <Stack.Screen name="post/new" options={{ animation: 'slide_from_bottom' }} />
       </Stack>
     </>
   );

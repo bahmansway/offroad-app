@@ -7,6 +7,7 @@ import type {
   ClanInvite, Conversation, EventCreateInput, EventDetail, EventInput, EventParticipant, EventScope, EventSummary, Id,
   MeInput, MemberRole, NotificationSettings, Message, Mod, ModInput, MyClanInvite, Pinned, PublicUser, RatingResult, ReportTarget, Spot,
   SpotInput, SpotType, Trim, User, UserRef,
+  ActivityItem, Comment, FollowListItem, FollowState, Page, Post, PostInput,
 } from './types';
 import { toArray } from './catalog';
 
@@ -175,6 +176,38 @@ export const api = {
   search: (q: string) => r<SearchResult>('/api/search', { query: { q } }),
   leaderboard: (period: LeaderboardPeriod) => r<Leaderboard>('/api/leaderboard', { query: { period } }),
 
+  // v6 photo posts (draft → photos → publish)
+  createPost: (b: PostInput) => r<Post>('/api/posts', { method: 'POST', body: b }),
+  uploadPostPhoto: (id: Id, index: number, data: Uint8Array, contentType = 'image/jpeg') =>
+    r<Post>(`/api/posts/${enc(id)}/photos/${index}`, { method: 'PUT', binary: { data, contentType } }),
+  deletePostPhoto: (id: Id, index: number) => r<void>(`/api/posts/${enc(id)}/photos/${index}`, { method: 'DELETE' }),
+  publishPost: (id: Id) => r<Post>(`/api/posts/${enc(id)}/publish`, { method: 'POST' }),
+  post: (id: Id) => r<Post>(`/api/posts/${enc(id)}`),
+  updatePost: (id: Id, b: PostInput) => r<Post>(`/api/posts/${enc(id)}`, { method: 'PATCH', body: b }),
+  deletePost: (id: Id) => r<void>(`/api/posts/${enc(id)}`, { method: 'DELETE' }),
+  likePost: (id: Id) => r<{ likeCount: number; likedByMe: boolean }>(`/api/posts/${enc(id)}/like`, { method: 'POST' }),
+  unlikePost: (id: Id) => r<{ likeCount: number; likedByMe: boolean }>(`/api/posts/${enc(id)}/like`, { method: 'DELETE' }),
+  savePost: (id: Id) => r<{ savedByMe: boolean }>(`/api/posts/${enc(id)}/save`, { method: 'POST' }),
+  unsavePost: (id: Id) => r<{ savedByMe: boolean }>(`/api/posts/${enc(id)}/save`, { method: 'DELETE' }),
+  comments: (id: Id, cursor?: string | null) => r<Page<Comment>>(`/api/posts/${enc(id)}/comments`, { query: { cursor } }),
+  addComment: (id: Id, text: string) => r<Comment>(`/api/posts/${enc(id)}/comments`, { method: 'POST', body: { text } }),
+  deleteComment: (id: Id) => r<void>(`/api/comments/${enc(id)}`, { method: 'DELETE' }),
+  feed: (cursor?: string | null) => r<Page<Post>>('/api/feed', { query: { cursor } }),
+  userPosts: (id: Id, cursor?: string | null) => r<Page<Post>>(`/api/users/${enc(id)}/posts`, { query: { cursor } }),
+  spotPosts: (id: Id, cursor?: string | null) => r<Page<Post>>(`/api/spots/${enc(id)}/posts`, { query: { cursor } }),
+  carPosts: (id: Id, cursor?: string | null) => r<Page<Post>>(`/api/cars/${enc(id)}/posts`, { query: { cursor } }),
+  savedPosts: (cursor?: string | null) => r<Page<Post>>('/api/me/saved', { query: { cursor } }),
+
+  // v6 follows + activity
+  follow: (userId: Id) => r<FollowState>(`/api/users/${enc(userId)}/follow`, { method: 'POST' }),
+  unfollow: (userId: Id) => r<FollowState>(`/api/users/${enc(userId)}/follow`, { method: 'DELETE' }),
+  followers: (userId: Id, q: { cursor?: string | null; q?: string; limit?: number } = {}) =>
+    r<Page<FollowListItem>>(`/api/users/${enc(userId)}/followers`, { query: { cursor: q.cursor, q: q.q, limit: q.limit } }),
+  following: (userId: Id, q: { cursor?: string | null; q?: string; limit?: number } = {}) =>
+    r<Page<FollowListItem>>(`/api/users/${enc(userId)}/following`, { query: { cursor: q.cursor, q: q.q, limit: q.limit } }),
+  followersSeen: () => r<void>('/api/me/followers/seen', { method: 'POST' }),
+  activity: (cursor?: string | null) => r<Page<ActivityItem>>('/api/me/activity', { query: { cursor } }),
+
   // safety
   block: (userId: Id) => r<void>(`/api/users/${enc(userId)}/block`, { method: 'POST' }),
   unblock: (userId: Id) => r<void>(`/api/users/${enc(userId)}/block`, { method: 'DELETE' }),
@@ -185,3 +218,19 @@ export const api = {
   report: (b: { targetType: ReportTarget; targetId: Id; reason: string }) =>
     r<unknown>('/api/reports', { method: 'POST', body: b }),
 };
+
+/**
+ * v6 "Dost" = we follow each other. Pages through my `following` list and keeps those who follow me back,
+ * shaped like the old friends list ({user, since}) so group pickers keep working. At most 1000 people.
+ */
+export async function loadMutualFollows(myId: Id): Promise<FriendItem[]> {
+  const out: FriendItem[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 20; page++) {
+    const r: { items: FollowListItem[]; nextCursor: string | null } = await api.following(myId, { cursor, limit: 50 });
+    r.items.filter((x) => x.followsMe && !x.isMe).forEach((x) => out.push({ user: { id: x.user.id, displayName: x.user.displayName, avatarUrl: x.user.avatarUrl }, since: x.since }));
+    cursor = r.nextCursor;
+    if (!cursor) break;
+  }
+  return out;
+}

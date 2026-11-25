@@ -1,219 +1,377 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import SpotMap from '../../components/map/Map';
-import { SpotCell } from '../../components/Rows';
+import { LogoMark } from '../../components/Brand';
+import { PostCard } from '../../components/posts/PostCard';
+import { ActionSheet } from '../../components/ActionSheet';
+import { FollowButton } from '../../components/FollowButton';
+import { photoUri } from '../../components/Rows';
+import { useEventCardText } from '../../components/EventCard';
 import {
-  EmptyState, ErrorState, GlassView, Icon, IconButton, LinkButton, LoadingState, PillButton, SearchField, Section,
-  SegmentedControl, Txt, useTabBarSpace,
+  Avatar, Contour, DifficultySign, EmptyState, ErrorState, GlassView, Icon, LoadingState, MountainMark, PillButton, Txt,
+  useTabBarSpace,
 } from '../../components/ui';
 import { api } from '../../lib/api';
-import { useAuth } from '../../lib/auth';
-import { errorMessage } from '../../lib/errors';
+import { onBeforeLogout, useAuth } from '../../lib/auth';
+import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { useTheme } from '../../lib/themeContext';
-import { radius } from '../../lib/theme';
-import { BAKU } from '../../lib/format';
-import { filterSpots, sortByDistance, type TypeFilter } from '../../lib/spotFilters';
-import { selectionFeedback, tapFeedback } from '../../lib/haptics';
-import type { Spot } from '../../lib/types';
+import { errorMessage } from '../../lib/errors';
+import { appendPage, patchPost, removePost, replaceWithFirstPage, shouldLoadMore } from '../../lib/postsLogic';
+import { clearFeedCache, pickTrips, readFeedCache, startsSuggested, writeFeedCache, type TripCard } from '../../lib/homeLogic';
+import { bakuParts, dateBlock, formatEventWhen } from '../../lib/eventLogic';
+import { formatPoints } from '../../lib/leaderboardLogic';
+import { badgeText } from '../../lib/chatLogic';
+import { font, radius, TAB_BAR, TAP } from '../../lib/theme';
+import { sameId } from '../../lib/format';
+import type { Id, Post } from '../../lib/types';
 
-const NEAR_COUNT = 3;
+const HEADER_ROW = 50;
 
-export default function ExploreScreen() {
-  const { t, d } = useI18n();
+/** v6 "Ana səhifə": trips row + photo feed of people I follow (and suggestions while I follow < 3). */
+export default function HomeScreen() {
+  const { t } = useI18n();
   const { c } = useTheme();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const chat = useChat();
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
-  const { width } = useWindowDimensions();
-  const [spots, setSpots] = useState<Spot[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const seq = useRef(0);
+  const userId = user?.id ?? null;
+  const cached = readFeedCache(userId);
+  const [items, setItems] = useState<Post[] | null>(cached?.items ?? null);
+  const [cursor, setCursor] = useState<string | null>(cached?.cursor ?? null);
   const [error, setError] = useState<unknown>(null);
-  const [type, setType] = useState<TypeFilter>('all');
-  const [range, setRange] = useState<[number, number]>([1, 5]);
-  const [levelOpen, setLevelOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [showAll, setShowAll] = useState(false);
-  const [center, setCenter] = useState<{ lat: number; lng: number } | undefined>(undefined);
+  const [moreError, setMoreError] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [trips, setTrips] = useState<TripCard[]>([]);
+  const [followingCount, setFollowingCount] = useState<number | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const seq = useRef(0);
 
-  useEffect(() => {
-    const h = setTimeout(() => setDebounced(query.trim()), 300);
-    return () => clearTimeout(h);
-  }, [query]);
-
-  const load = useCallback(async () => {
-    // Only the newest request may update the list (typing fast fires several).
-    const id = ++seq.current;
+  const loadFirst = useCallback(async () => {
+    const my = ++seq.current;
+    setError(null);
+    setMoreError(false);
+    if (!userId) { setItems(null); return; }
     try {
-      const res = await api.spots({ q: debounced || undefined });
-      if (id !== seq.current) return;
-      setError(null);
-      setSpots(res.items);
+      const r = await api.feed();
+      if (my !== seq.current) return;
+      const list = replaceWithFirstPage(r.items);
+      setItems(list);
+      setCursor(r.nextCursor);
+      writeFeedCache(userId, list, r.nextCursor);
     } catch (e) {
-      if (id === seq.current) setError(e);
-    } finally {
-      if (id === seq.current) setLoaded(true);
+      if (my === seq.current) setError(e);
     }
-  }, [debounced]);
+  }, [userId]);
 
-  // reload whenever the tab gets focus (e.g. after adding or deleting a spot)
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const loadTrips = useCallback(async () => {
+    try {
+      const [mine, up] = await Promise.all([
+        userId ? api.events({ scope: 'mine', limit: 20 }).catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+        api.events({ scope: 'upcoming', limit: 20 }).catch(() => ({ items: [] })),
+      ]);
+      setTrips(pickTrips(mine.items, up.items));
+    } catch { /* the row just stays empty */ }
+  }, [userId]);
 
-  const visible = useMemo(() => filterSpots(spots, { type, minLevel: range[0], maxLevel: range[1] }), [spots, type, range]);
-  const near = useMemo(() => sortByDistance(visible), [visible]);
-  const list = showAll ? near : near.slice(0, NEAR_COUNT);
+  // logging out forgets the cached first page
+  useEffect(() => onBeforeLogout(async () => clearFeedCache()), []);
 
-  const pinLabel = useCallback(
-    (sp: Spot) => sp.type === 'camp' ? t('explore.campPin', { name: sp.name }) : t('explore.spotPin', { name: sp.name, level: sp.difficulty ?? '' }),
-    [t],
+  // another account: never show the last one's feed
+  useEffect(() => {
+    const cc = readFeedCache(userId);
+    seq.current++;
+    setItems(cc?.items ?? null);
+    setCursor(cc?.cursor ?? null);
+    setFollowingCount(null);
+  }, [userId]);
+
+  useFocusEffect(useCallback(() => {
+    loadFirst();
+    loadTrips();
+    if (userId) {
+      api.user(userId).then((u) => setFollowingCount(u.followingCount ?? null)).catch(() => {});
+      chat.refreshUnread();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadFirst, loadTrips, userId]));
+
+  async function refresh() {
+    setRefreshing(true);
+    await Promise.all([loadFirst(), loadTrips()]);
+    setRefreshing(false);
+  }
+
+  async function loadMore() {
+    if (!shouldLoadMore({ cursor, loading: loadingMore, error: moreError }) || !items) return;
+    const my = seq.current;
+    setLoadingMore(true);
+    try {
+      const r = await api.feed(cursor);
+      if (my !== seq.current) return;
+      setItems((cur) => appendPage(cur ?? [], r.items));
+      setCursor(r.nextCursor);
+    } catch {
+      if (my === seq.current) setMoreError(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  const patch = useCallback((id: Id, p: Partial<Post>) => setItems((cur) => (cur ? patchPost(cur, id, p) : cur)), []);
+  const drop = useCallback((id: Id) => setItems((cur) => (cur ? removePost(cur, id) : cur)), []);
+
+  const headerH = insets.top + HEADER_ROW;
+  const tabBarTop = Math.max(insets.bottom - 10, 0) + TAB_BAR.gap + TAB_BAR.height;
+  const showWelcome = !!user && items !== null && (items.length === 0 || (followingCount !== null && followingCount < 3));
+  const bell = badgeText(chat.newFollowers);
+
+  const listHeader = (
+    <View style={{ gap: 16, paddingTop: 6 }}>
+      {trips.length ? <TripsRow trips={trips} /> : (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16 }}>
+          <AllEventsLink />
+        </View>
+      )}
+      {showWelcome ? <Welcome name={user!.displayName} onShare={() => router.push('/post/new')} myId={user!.id} /> : null}
+    </View>
   );
-  const openSpot = useCallback((id: Spot['id']) => router.push(`/spot/${id}`), []);
-  const pinTap = useCallback((id: Spot['id']) => { tapFeedback(); router.push(`/spot/${id}`); }, []);
-  const sheetH = (showAll ? 460 : 300) + tabSpace;
-  const levelActive = range[0] !== 1 || range[1] !== 5;
-  const recenter = () => setCenter((p) => (p && p.lat === BAKU.lat ? { lat: BAKU.lat + 1e-7, lng: BAKU.lng } : { lat: BAKU.lat, lng: BAKU.lng }));
+
+  let body: React.ReactNode;
+  if (authLoading) body = <LoadingState />;
+  else if (!user) {
+    body = (
+      <ScrollView contentContainerStyle={{ paddingTop: headerH, paddingBottom: tabSpace }}>
+        {listHeader}
+        <EmptyState illustration="mountain" title={t('home.loginTitle')} text={t('home.loginText')} actionLabel={t('common.login')} onAction={() => router.push('/login')} />
+      </ScrollView>
+    );
+  } else {
+    body = (
+      <FlatList
+        data={items ?? []}
+        keyExtractor={(p) => String(p.id)}
+        contentContainerStyle={{ paddingTop: headerH, paddingBottom: tabSpace + 72, width: '100%', maxWidth: 640, alignSelf: 'center' }}
+        ListHeaderComponent={listHeader}
+        renderItem={({ item, index }) => (
+          <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+            {startsSuggested(items ?? [], index) ? (
+              <View style={{ paddingHorizontal: 4, paddingBottom: 10, gap: 2 }}>
+                <Txt variant="footnote" tone="label2" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '600' }} accessibilityRole="header">{t('home.suggested')}</Txt>
+                <Txt variant="footnote" tone="label2">{t('home.suggestedHint')}</Txt>
+              </View>
+            ) : null}
+            <PostCard post={item} onPatch={(p) => patch(item.id, p)} onRemoved={() => drop(item.id)} />
+          </View>
+        )}
+        ListEmptyComponent={items === null ? (error ? <ErrorState message={errorMessage(error, t)} onRetry={loadFirst} /> : <LoadingState inline />) : undefined}
+        ListFooterComponent={items && items.length ? (
+          loadingMore ? <ActivityIndicator color={c.label2} style={{ paddingVertical: 20 }} />
+            : moreError ? <ErrorState message={t('home.loadMoreFailed')} onRetry={() => { setMoreError(false); setTimeout(loadMore, 0); }} />
+              : !cursor ? <Txt variant="footnote" tone="label2" center style={{ paddingVertical: 20 }}>{t('home.endOfFeed')}</Txt> : undefined
+        ) : undefined}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.6}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.tint} colors={[c.tint]} progressBackgroundColor={c.card} progressViewOffset={headerH} />}
+        removeClippedSubviews={Platform.OS === 'android'}
+        windowSize={7}
+        initialNumToRender={3}
+      />
+    );
+  }
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.mapBg }}>
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-        <SpotMap
-          spots={visible}
-          onSpotPress={pinTap}
-          label={t('explore.mapLabel')}
-          pinLabel={pinLabel}
-          errorInsets={{ top: insets.top + 120, bottom: sheetH, left: 16, right: 76 }}
-          center={center}
-          zoom={center ? 7 : undefined}
-        />
-      </View>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      {body}
 
-      {/* floating controls */}
-      <View pointerEvents="box-none" style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 12, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <SearchField
-            glass
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t('explore.search')}
-            label={t('explore.searchLabel')}
-            style={{ flex: 1, minWidth: 0 }}
-            accessory={
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('search.openExplore')}
-                onPress={() => router.push(query.trim() ? { pathname: '/search', params: { q: query.trim() } } : '/search')}
-                hitSlop={6}
-                style={({ pressed }) => [{ height: 36, minWidth: 36, borderRadius: 18, paddingHorizontal: width > 360 ? 10 : 0, justifyContent: 'center', marginRight: -8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.tintSoft }, pressed && { opacity: 0.6 }]}
-              >
-                <Icon name="people" size={16} color={c.tintSoftText} strokeWidth={2.4} />
-                {/* narrow phones (≤ 360 pt): icon only, so the spot search keeps room for its placeholder */}
-                {width > 360 ? <Txt variant="footnote" color={c.tintSoftText} style={{ fontWeight: '700' }} numberOfLines={1}>{t('search.peopleShort')}</Txt> : null}
-              </Pressable>
-            }
+      {/* compact header: logo + YOLCHU, search, activity bell */}
+      <GlassView borderless style={{ position: 'absolute', top: 0, left: 0, right: 0, height: headerH, paddingTop: insets.top, backgroundColor: Platform.OS === 'android' ? c.bg : undefined }}>
+        <View style={{ height: HEADER_ROW, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 16, paddingRight: 8, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
+          <LogoMark size={30} />
+          <Txt style={[font('800'), { fontSize: 20, letterSpacing: 1.5, flex: 1 }]} accessibilityRole="header" accessibilityLabel={t('home.a11yHeader')}>YOLCHU</Txt>
+          <HeaderButton icon="search" label={t('home.search')} onPress={() => router.push('/search')} />
+          <HeaderButton
+            icon="bell"
+            label={bell ? t('home.bellNew', { count: chat.newFollowers }) : t('home.bell')}
+            badge={bell}
+            onPress={() => router.push(user ? '/activity' : '/login')}
           />
-          <View>
-            <IconButton icon="filter" label={t('explore.filters')} glass size={50} onPress={() => setLevelOpen((o) => !o)} color={levelActive ? c.tint : c.label} />
-            {levelActive ? <View style={{ position: 'absolute', top: 4, right: 4, width: 10, height: 10, borderRadius: 5, backgroundColor: c.tint }} /> : null}
-          </View>
-          <IconButton icon="trophy" label={t('board.open')} glass size={50} onPress={() => router.push('/leaderboard')} color={c.tint} />
-        </View>
-        <SegmentedControl<TypeFilter>
-          glass
-          label={t('explore.typeLabel')}
-          value={type}
-          onChange={setType}
-          options={[
-            { value: 'all', label: t('explore.all') },
-            { value: 'trail', label: t('explore.trails'), icon: 'trail', iconColor: c.clay },
-            { value: 'camp', label: t('explore.camps'), icon: 'tent', iconColor: c.forest },
-          ]}
-          style={{ alignSelf: 'center' }}
-        />
-        {levelOpen ? (
-          <GlassView elevated style={{ borderRadius: radius.card, padding: 16, gap: 12 }}>
-            <Txt variant="headline">{t('explore.levelFilterTitle')}</Txt>
-            {(['minLevel', 'maxLevel'] as const).map((which, idx) => (
-              <View key={which} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }} accessibilityRole="radiogroup" accessibilityLabel={t(`explore.${which}`)}>
-                <Txt variant="subhead" tone="label2" style={{ width: 84 }}>{t(`explore.${which}`)}</Txt>
-                {[1, 2, 3, 4, 5].map((n) => {
-                  const on = range[idx] === n;
-                  const disabled = idx === 0 ? n > range[1] : n < range[0];
-                  return (
-                    <Pressable
-                      key={n}
-                      accessibilityRole="radio"
-                      accessibilityLabel={`${n} — ${d.levels.names[n - 1]}`}
-                      accessibilityState={{ checked: on, disabled }}
-                      disabled={disabled}
-                      onPress={() => { if (!on) selectionFeedback(); setRange((r) => (idx === 0 ? [n, r[1]] : [r[0], n])); }}
-                      style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tint : c.fill, opacity: disabled ? 0.35 : 1 }}
-                    >
-                      <Txt variant="headline" color={on ? c.onTint : c.label}>{n}</Txt>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ))}
-            <Txt variant="footnote" tone="label2">{t('explore.levelFilterHint')}</Txt>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <PillButton title={t('explore.reset')} variant="gray" size="medium" style={{ flex: 1 }} onPress={() => setRange([1, 5])} />
-              <PillButton title={t('explore.apply')} size="medium" style={{ flex: 1 }} onPress={() => setLevelOpen(false)} />
-            </View>
-          </GlassView>
-        ) : null}
-      </View>
-
-      {/* right-side map buttons */}
-      <View pointerEvents="box-none" style={{ position: 'absolute', right: 16, bottom: tabSpace + 296, gap: 12 }}>
-        <IconButton icon="navigate" label={t('explore.recenter')} glass size={50} color={c.tint} onPress={recenter} />
-        <IconButton icon="plus" label={t('explore.addSpot')} glass size={50} color={c.tint} onPress={() => router.push(user ? '/spot/new' : '/login')} />
-      </View>
-
-      {/* bottom sheet */}
-      <GlassView
-        borderless
-        style={{
-          position: 'absolute', left: 0, right: 0, bottom: 0, height: sheetH,
-          borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, backgroundColor: c.sheet,
-        }}
-      >
-        <View style={{ width: '100%', maxWidth: 640, alignSelf: 'center', flex: 1 }}>
-          <View style={{ width: 36, height: 5, borderRadius: 3, backgroundColor: c.grabber, alignSelf: 'center', marginTop: 8 }} />
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 6 }}>
-            <View>
-              <Txt variant="title2" accessibilityRole="header">{t('explore.nearYou')}</Txt>
-              <Txt variant="caption" tone="label2">{t('explore.nearYouHint')}</Txt>
-            </View>
-            {near.length > NEAR_COUNT ? <LinkButton title={showAll ? t('explore.showLess') : t('explore.seeAll')} onPress={() => setShowAll((v) => !v)} /> : null}
-          </View>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: tabSpace }}>
-            {error ? <ErrorState message={errorMessage(error, t)} onRetry={load} /> : null}
-            {!loaded && !error ? <LoadingState inline /> : null}
-            {loaded && !error && list.length === 0 ? (
-              spots.length === 0 && !debounced ? (
-                <EmptyState
-                  illustration="mountain"
-                  title={t('explore.emptyNearTitle')}
-                  text={t('explore.emptyNearText')}
-                  actionLabel={t('explore.addSpot')}
-                  onAction={() => router.push(user ? '/spot/new' : '/login')}
-                  style={{ paddingVertical: 12 }}
-                />
-              ) : <EmptyState icon="explore" title={t('explore.empty')} style={{ paddingVertical: 12 }} contour={false} />
-            ) : null}
-            {list.length > 0 ? (
-              <Section>
-                {list.map((sp) => <SpotCell key={sp.id} spot={sp} km={sp.km} onPress={() => openSpot(sp.id)} />)}
-              </Section>
-            ) : null}
-          </ScrollView>
         </View>
       </GlassView>
+
+      {/* "+": only on Home, 16 px above the tab bar */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('home.create')}
+        onPress={() => (user ? setCreateOpen(true) : router.push('/login'))}
+        style={({ pressed }) => [{
+          position: 'absolute', right: 16, bottom: tabBarTop + 16, width: 56, height: 56, borderRadius: 28, backgroundColor: c.tint,
+          alignItems: 'center', justifyContent: 'center', shadowColor: c.tint, shadowOpacity: 0.4, shadowRadius: 11, shadowOffset: { width: 0, height: 8 }, elevation: 8,
+        }, pressed && { opacity: 0.85 }]}
+      >
+        <Icon name="plus" size={26} color={c.onTint} strokeWidth={2.6} />
+      </Pressable>
+      <ActionSheet
+        visible={createOpen}
+        title={t('home.createTitle')}
+        onClose={() => setCreateOpen(false)}
+        actions={[
+          { label: t('home.newPost'), onPress: () => router.push('/post/new') },
+          { label: t('home.shareSpot'), onPress: () => router.push('/spot/new') },
+          { label: t('home.createEvent'), onPress: () => router.push('/event/new') },
+        ]}
+      />
     </View>
   );
 }
 
+function HeaderButton({ icon, label, onPress, badge }: { icon: 'search' | 'bell'; label: string; onPress: () => void; badge?: string }) {
+  const { c } = useTheme();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => [{ width: TAP, height: TAP, alignItems: 'center', justifyContent: 'center' }, pressed && { opacity: 0.5 }]}>
+      <Icon name={icon} size={23} color={c.label} strokeWidth={2.1} />
+      {badge ? (
+        <View style={{ position: 'absolute', right: 6, top: 6, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, backgroundColor: c.destructive, alignItems: 'center', justifyContent: 'center' }}>
+          <Txt style={{ fontSize: 10, lineHeight: 12, fontWeight: '700', color: '#FFFFFF' }}>{badge}</Txt>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function AllEventsLink() {
+  const { t } = useI18n();
+  return (
+    <Pressable accessibilityRole="link" onPress={() => router.push('/events')} hitSlop={6} style={({ pressed }) => [{ minHeight: TAP, justifyContent: 'center' }, pressed && { opacity: 0.6 }]}>
+      <Txt variant="subhead" tone="tint">{t('home.allEvents')}</Txt>
+    </Pressable>
+  );
+}
+
+function TripsRow({ trips }: { trips: TripCard[] }) {
+  const { t } = useI18n();
+  return (
+    <View accessibilityLabel={t('home.trips')}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, minHeight: TAP }}>
+        <Txt variant="footnote" tone="label2" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '600' }} accessibilityRole="header">{t('home.trips')}</Txt>
+        <AllEventsLink />
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingHorizontal: 16, paddingTop: 2, paddingBottom: 4 }}>
+        {trips.map((x) => <Trip key={`${x.kind}-${x.event.id}`} trip={x} />)}
+      </ScrollView>
+    </View>
+  );
+}
+
+function Trip({ trip }: { trip: TripCard }) {
+  const { c } = useTheme();
+  const { t, d } = useI18n();
+  const e = trip.event;
+  const x = useEventCardText(e);
+  const next = trip.kind === 'next';
+  const kicker = next ? t('home.nextTrip') : trip.kind === 'weekend' ? t('home.thisWeekend') : t('home.comingUp');
+  const b = dateBlock(e.startsAt, d.events.monthsShort);
+  const wd = d.events.weekdaysLong[bakuParts(new Date(e.startsAt)).weekday] ?? '';
+  const meta = next ? t('home.meetAt', { time: x.time, cars: x.cars }) : [x.clan, x.cars].filter(Boolean).join(' · ');
+  const when = formatEventWhen(e.startsAt, null, { weekdays: d.events.weekdays, months: d.chat.months });
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`${t('home.tripA11y', { kicker, title: e.title, date: when })}, ${x.place}, ${x.cars}${x.level ? `, ${t('spot.difficulty')} ${x.level}` : ''}`}
+      onPress={() => router.push(`/event/${e.id}`)}
+      style={({ pressed }) => [{
+        width: 300, minHeight: 112, borderRadius: 20, backgroundColor: c.card, padding: 12, flexDirection: 'row', gap: 12,
+        borderWidth: next ? 1.5 : 0, borderColor: c.tint,
+      }, pressed && { opacity: 0.85 }]}
+    >
+      <View style={{ width: 60, height: 84, borderRadius: 12, overflow: 'hidden', backgroundColor: c.card, borderWidth: 0.5, borderColor: c.separator, alignItems: 'center' }} importantForAccessibility="no-hide-descendants">
+        <View style={{ alignSelf: 'stretch', height: 20, backgroundColor: next ? c.tint : c.paper, alignItems: 'center', justifyContent: 'center' }}>
+          <Txt style={{ fontSize: 11, fontWeight: '700', letterSpacing: 0.5 }} color={next ? c.onTint : c.paperText}>{b.month.toLocaleUpperCase()}</Txt>
+        </View>
+        <Txt style={[font('800'), { fontSize: 26, lineHeight: 32, marginTop: 4 }]}>{b.day}</Txt>
+        <Txt variant="caption" tone="label2" style={{ fontSize: 11 }} numberOfLines={1}>{wd}</Txt>
+      </View>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }} importantForAccessibility="no-hide-descendants">
+        <Txt style={{ fontSize: 11, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase' }} color={next ? c.tint : c.label2}>{kicker}</Txt>
+        <Txt variant="headline" numberOfLines={1}>{e.title}</Txt>
+        <Txt variant="footnote" tone="label2" numberOfLines={1}>{meta}</Txt>
+        {x.levelNum ? <DifficultySign level={x.levelNum} style={{ marginTop: 3, alignSelf: 'flex-start' }} /> : null}
+      </View>
+    </Pressable>
+  );
+}
+
+/** New user: welcome card + "Sürücüləri izlə" (clan mates first, then this month's most active drivers). */
+function Welcome({ name, onShare, myId }: { name: string; onShare: () => void; myId: Id }) {
+  const { c } = useTheme();
+  const { t, lang } = useI18n();
+  const [people, setPeople] = useState<{ id: Id; displayName: string; avatarUrl: string | null; why: string; isFollowing: boolean }[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const [me, board, following] = await Promise.all([
+        api.user(myId).catch(() => null),
+        api.leaderboard('month').catch(() => null),
+        api.following(myId, { limit: 50 }).catch(() => null),
+      ]);
+      const followed = new Set((following?.items ?? []).map((f) => String(f.user.id)));
+      const out: { id: Id; displayName: string; avatarUrl: string | null; why: string; isFollowing: boolean }[] = [];
+      const add = (u: { id: Id; displayName: string; avatarUrl: string | null }, why: string) => {
+        if (sameId(u.id, myId) || out.some((o) => sameId(o.id, u.id))) return;
+        out.push({ ...u, why, isFollowing: followed.has(String(u.id)) });
+      };
+      if (me?.clan) {
+        const m = await api.clanMembers(me.clan.id).catch(() => null);
+        m?.items.slice(0, 10).forEach((x) => add(x.user, t('home.clanMate', { clan: me.clan!.name })));
+      }
+      board?.items.filter((i) => !i.blocked).forEach((i) => add(i.user, t('home.activeMonth', { points: formatPoints(i.points, lang) })));
+      if (live) setPeople(out.filter((p) => !p.isFollowing).slice(0, 6));
+    })();
+    return () => { live = false; };
+  }, [myId, t, lang]);
+
+  return (
+    <View style={{ paddingHorizontal: 16, gap: 0 }}>
+      <View style={{ borderRadius: radius.card, backgroundColor: c.card, padding: 20, paddingTop: 22, gap: 6, overflow: 'hidden' }}>
+        <Contour color={c.tint} opacity={0.1} seed={5} width={260} height={140} style={{ left: undefined, bottom: undefined, right: -30, top: -10, width: 260, height: 140 }} />
+        <MountainMark size={48} color={c.tint} />
+        <Txt variant="title2" accessibilityRole="header" style={{ marginTop: 6 }}>{t('home.welcome', { name })}</Txt>
+        <Txt variant="subhead" tone="label2">{t('home.emptyText')}</Txt>
+        <PillButton title={t('home.shareFirst')} icon="camera" size="medium" onPress={onShare} style={{ marginTop: 12 }} />
+      </View>
+      {people && people.length ? (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingTop: 18, paddingBottom: 2, minHeight: TAP }}>
+            <Txt variant="footnote" tone="label2" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '600' }} accessibilityRole="header">{t('home.followDrivers')}</Txt>
+            <Pressable accessibilityRole="link" onPress={() => router.push('/leaderboard')} hitSlop={6} style={{ minHeight: TAP, justifyContent: 'center' }}>
+              <Txt variant="subhead" tone="tint">{t('home.seeAll')}</Txt>
+            </Pressable>
+          </View>
+          <View style={{ borderRadius: radius.card, backgroundColor: c.card, overflow: 'hidden' }}>
+            {people.map((p, i) => (
+              <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 16, paddingRight: 12, minHeight: 66 }}>
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={`${p.displayName}, ${p.why}`}
+                  onPress={() => router.push(`/user/${p.id}`)}
+                  style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch', borderBottomWidth: i < people.length - 1 ? 0.5 : 0, borderBottomColor: c.separator }}
+                >
+                  <Avatar uri={photoUri(p.avatarUrl)} name={p.displayName} size={44} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Txt variant="headline" numberOfLines={1}>{p.displayName}</Txt>
+                    <Txt variant="footnote" tone="label2" numberOfLines={1}>{p.why}</Txt>
+                  </View>
+                </Pressable>
+                <FollowButton user={p} onChange={(s) => setPeople((cur) => cur?.map((x) => (sameId(x.id, p.id) ? { ...x, isFollowing: s.isFollowing } : x)) ?? cur)} />
+              </View>
+            ))}
+          </View>
+          <Txt variant="footnote" tone="label2" style={{ marginTop: 8, marginHorizontal: 16 }}>{t('home.suggestHint')}</Txt>
+        </>
+      ) : null}
+    </View>
+  );
+}

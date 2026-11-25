@@ -14,7 +14,8 @@ export default function LeaderboardInfo() {
     { icon: 'events', tone: 'sand', text: t('board.rules.organized', { points: R.organized, max: R.organizedPerMonth }) },
     { icon: 'car', tone: 'sand', text: t('board.rules.attended', { points: R.attended, max: R.attendedPerMonth }) },
     { icon: 'clock', tone: 'sand', text: t('board.rules.eventRule', { minutes: R.minEventMinutes, cars: R.minCarsGoing }) },
-    { icon: 'camera', tone: 'stone', text: t('board.rules.car', { points: R.car, max: R.carsCounted }) },
+    { icon: 'camera', tone: 'clay', text: t('board.rules.post', { points: R.post, max: R.postsPerMonth, reporters: R.postReportersToDrop }) },
+    { icon: 'car', tone: 'stone', text: t('board.rules.car', { points: R.car, max: R.carsCounted }) },
     { icon: 'star', tone: 'forest', text: t('board.rules.rating', { points: R.rating, max: R.ratingsPerMonth }) },
     { icon: 'calendarSmall', tone: 'stone', text: t('board.rules.months') },
   ];

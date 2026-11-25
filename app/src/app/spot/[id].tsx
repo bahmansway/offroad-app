@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Linking, Platform, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Hero } from '../../components/Hero';
@@ -9,6 +9,9 @@ import {
   Section, SectionHeader, StarRating, Txt,
 } from '../../components/ui';
 import { MoreMenu, type SheetAction } from '../../components/ActionSheet';
+import { useNavigate } from '../../components/NavigateSheet';
+import { PostStrip } from '../../components/posts/PostGrid';
+import { shareLink } from '../../lib/share';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -27,9 +30,11 @@ export default function SpotScreen() {
   const { data: spot, setData, error, loading, reload } = useAsync(() => api.spot(id), [id, user?.id]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rating, setRating] = useState(false);
+  const nav = useNavigate();
+  const [stripKey, setStripKey] = useState(0);
 
   // refresh after coming back from the edit screen
-  useRefocus(reload);
+  useRefocus(() => { reload(); setStripKey((k) => k + 1); });
 
   if (loading && !spot) return <LoadingState />;
   if (error || !spot) {
@@ -62,20 +67,17 @@ export default function SpotScreen() {
     if (!(await confirmAsync(t('spot.deleteConfirm'), t('common.delete'), t('common.cancel'), { destructive: true }))) return;
     try {
       await api.deleteSpot(spot!.id);
-      router.replace('/');
+      router.replace('/explore');
     } catch (e) {
       setActionError(errorMessage(e, t));
     }
   }
 
-  function navigate() {
-    const { lat, lng } = spot!;
-    const url = Platform.select({
-      ios: `http://maps.apple.com/?daddr=${lat},${lng}`,
-      android: `geo:${lat},${lng}?q=${lat},${lng}`,
-      default: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=13/${lat}/${lng}`,
-    });
-    Linking.openURL(url);
+  const navigate = () => nav.open({ lat: spot.lat, lng: spot.lng, name: spot.name });
+  async function share() {
+    const r = await shareLink('spot', spot!.id, spot!.name);
+    if (r === 'copied') setActionError(null);
+    if (r === 'failed') setActionError(t('post.shareFailed'));
   }
 
   const level = spot.type === 'trail' && spot.difficulty ? spot.difficulty : null;
@@ -83,9 +85,13 @@ export default function SpotScreen() {
   const upcoming = spot.upcomingEvents ?? [];
   const isTrail = spot.type === 'trail';
   const report = () => router.push(user ? { pathname: '/report', params: { targetType: 'spot', targetId: String(spot.id) } } : '/login');
-  const menu: SheetAction[] = isOwner
-    ? [{ label: t('common.delete'), destructive: true, onPress: remove }]
-    : [{ label: t('spot.report'), destructive: true, onPress: report }];
+  const menu: SheetAction[] = [
+    { label: t('spot.shareLink'), onPress: share },
+    ...(user ? [{ label: t('home.newPost'), onPress: () => router.push({ pathname: '/post/new', params: { spotId: String(spot.id), spotName: spot.name } }) }] : []),
+    ...(isOwner
+      ? [{ label: t('common.delete'), destructive: true, onPress: remove }]
+      : [{ label: t('spot.report'), destructive: true, onPress: report }]),
+  ];
   const createEvent = () => router.push(user ? { pathname: '/event/new', params: { spotId: String(spot.id) } } : '/login');
 
   return (
@@ -156,6 +162,8 @@ export default function SpotScreen() {
             </Section>
           ) : null}
 
+          <PostStrip title={t('spot.photos')} load={() => api.spotPosts(spot.id)} reloadKey={`${spot.id}-${stripKey}`} />
+
           {upcoming.length ? (
             <View style={{ gap: 10 }}>
               <SectionHeader title={t('events.upcomingHere')} />
@@ -180,9 +188,10 @@ export default function SpotScreen() {
       </ScrollView>
 
       <View style={{ position: 'absolute', left: 16, right: 16, bottom: 24 + insets.bottom, flexDirection: 'row', gap: 10, maxWidth: 608, alignSelf: 'center' }}>
-        <PillButton title={t('spot.navigate')} icon="navigate" onPress={navigate} style={{ flex: 1 }} />
+        <PillButton title={t('nav.button')} icon="navigate" onPress={navigate} style={{ flex: 1 }} />
         <PillButton title={t('events.create')} variant="secondary" onPress={createEvent} />
       </View>
+      {nav.sheet}
     </View>
   );
 }

@@ -138,7 +138,7 @@ describe('power unit and server limits', () => {
   it('explains the 20-car cap and the photo quota', () => {
     const t = (k: string, p?: Record<string, string | number>) => translate('en', k, p);
     expect(errorMessage(new ApiError(409, 'CONFLICT', ''), t, 'car')).toMatch(/20 cars/);
-    expect(errorMessage(new ApiError(409, 'CONFLICT', ''), t, 'photo')).toMatch(/20 MB/);
+    expect(errorMessage(new ApiError(409, 'CONFLICT', ''), t, 'photo')).toMatch(/50 MB/);
     expect(errorMessage(new ApiError(413, 'VALIDATION', ''), t, 'photo')).toMatch(/too large/);
     expect(errorMessage(new ApiError(415, 'VALIDATION', ''), t, 'photo')).toMatch(/could not be uploaded/);
   });

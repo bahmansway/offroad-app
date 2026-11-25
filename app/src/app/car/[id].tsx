@@ -9,6 +9,7 @@ import {
   SectionHeader, StarRating, Txt,
 } from '../../components/ui';
 import { MoreMenu, type SheetAction } from '../../components/ActionSheet';
+import { PostStrip } from '../../components/posts/PostGrid';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -213,6 +214,8 @@ export default function CarScreen() {
             </View>
           </Card>
         </View>
+
+        <PostStrip title={t('car.posts')} load={() => api.carPosts(car.id)} reloadKey={car.id} />
 
         {isOwner ? null : (
           <Section header={t('garage.rateTitle')}>

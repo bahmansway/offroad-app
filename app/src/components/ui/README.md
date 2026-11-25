@@ -119,3 +119,17 @@ Never on scrolling, typing or ordinary buttons (`PillButton` / `IconButton` have
 - `PublicUser` already has `clan` and `isBlocked`; `ReportTarget` includes `message` and `clan`.
 - Unread count on the tab: set `tabBarBadge` on the `chat` screen in `app/(tabs)/_layout.tsx`.
 - Message bubbles: use `c.tint` / `c.onTint` (mine) and `c.card` / `c.label` (theirs), radius 18.
+
+## v6 (posts, follows, Home, Explore)
+| Piece | Use |
+|---|---|
+| `FloatingTabBar` | Tabs: `index` (Ana səhifə) · `explore` · `chat` (raised 52 px centre circle, `CENTER_TAB`) · `garage` · `profile`. Events are a pushed page (`/events`) |
+| `PostCard` (`components/posts`) | Feed card (`variant="card"`) or top of the post page (`"detail"`). Square photos, double-tap like, dots + "1/3" only for several photos, car chip (stone) + road chip (clay) |
+| `PhotoCarousel` / `PhotoDots` | Square swipe photos; web gets small arrows |
+| `PostGrid` / `PostStrip` | 3-column profile grid (stack icon for several photos, long-press own posts) / horizontal strip on spot + car pages |
+| `usePostActions` | Like / save (optimistic), share link, edit / delete / report / block menu |
+| `FollowButton` | "İzlə" / "Geri izlə" orange, "İzləyirsən" grey. `size="small"` rows, `"large"` profile |
+| `ProfileView` | Own profile tab and `/user/:id` |
+| `useNavigate()` (`components/NavigateSheet`) | "Yol göstər" chooser: Waze, Google Maps, Apple Maps (iOS only). Remembers "Həmişə bununla aç" per device; reset in Settings |
+| `PickerModal` | Full-height list chooser with search (car / road for a post) |
+| Map | Spot pins are one clustered GeoJSON source (`map/pinLayers.ts`, same code on web and in the phone WebView). Only changed pins are sent (`lib/mapData.ts`); `selectedId` draws the tapped pin orange |

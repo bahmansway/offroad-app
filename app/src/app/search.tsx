@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useSearch } from '../lib/useSearch';
 
-/** People / clans / my chats search, opened from the Kəşf et header. */
+/** People / clans / my chats search, opened from the Home header. */
 export default function SearchScreenKeyed() {
   const { user } = useAuth();
   return <SearchScreen key={user?.id ?? 'anon'} />;

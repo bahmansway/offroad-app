@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { router } from 'expo-router';
 import { EmptyState, ErrorState, LoadingState, Section, Txt } from './ui';
 import { ClanResultCell, ConversationCell, PersonCell } from './ChatRows';
+import { FollowButton } from './FollowButton';
 import { useI18n } from '../lib/i18n';
 import { errorMessage } from '../lib/errors';
 import { hasResults } from '../lib/searchLogic';
@@ -21,7 +22,14 @@ export function SearchResults({ search, raw }: { search: ReturnType<typeof useSe
       {result?.users.length ? (
         <Section header={t('search.people')}>
           {result.users.map((u) => (
-            <PersonCell key={u.id} user={u} isFriend={u.isFriend} onPress={() => router.push(`/user/${u.id}`)} />
+            <PersonCell
+              key={u.id}
+              user={u}
+              isFriend={u.isFriend}
+              onPress={() => router.push(`/user/${u.id}`)}
+              // v6: İzlə / İzləyirsən right in the results (hidden for me)
+              right={<FollowButton user={{ id: u.id, displayName: u.displayName, isFollowing: u.isFollowing ?? u.isFriend }} />}
+            />
           ))}
         </Section>
       ) : null}

@@ -64,6 +64,23 @@ const ICONS = {
   userCheck: { sf: 'person.badge.checkmark', d: 'M10 11a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M3 20a7 7 0 0 1 11-5.7 M15.5 17.5l2 2 4-4' },
   userClock: { sf: 'person.badge.clock', d: 'M10 11a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M3 20a7 7 0 0 1 9.5-6.5 M18 21a4 4 0 1 0 0-8a4 4 0 1 0 0 8Z M18 15v2l1.2 1' },
   more: { sf: 'ellipsis', d: 'M3.2 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z M10.1 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z M17 12a1.9 1.9 0 1 0 3.8 0a1.9 1.9 0 1 0-3.8 0Z', filled: true },
+  // v6
+  home: { sf: 'house', d: 'M4 10.5 12 4l8 6.5V20h-5.5v-5.5h-5V20H4Z' },
+  heart: { sf: 'heart', d: 'M12 20s-7.5-4.6-7.5-10.2A4.2 4.2 0 0 1 12 7.3a4.2 4.2 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20Z' },
+  heartFill: { sf: 'heart.fill', d: 'M12 20s-7.5-4.6-7.5-10.2A4.2 4.2 0 0 1 12 7.3a4.2 4.2 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20Z', filled: true },
+  comment: { sf: 'bubble.right', d: 'M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.3-4A8 8 0 1 1 20 11.5Z' },
+  bookmark: { sf: 'bookmark', d: 'M6.5 3.5h11v17l-5.5-4-5.5 4Z' },
+  bookmarkFill: { sf: 'bookmark.fill', d: 'M6.5 3.5h11v17l-5.5-4-5.5 4Z', filled: true },
+  gear: { sf: 'gearshape', d: 'M12 15a3 3 0 1 0 0-6a3 3 0 1 0 0 6Z M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.6 7.6 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.6 7.6 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.6 7.6 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 2.6-1.5l2.4.9 2-3.4Z' },
+  grid: { sf: 'square.grid.3x3', d: 'M4 4h7v7H4Z M13 4h7v7h-7Z M4 13h7v7H4Z M13 13h7v7h-7Z' },
+  stack: { sf: 'square.on.square', d: 'M8 8h12v12H8Z M4 16V4h12' },
+  arrowUp: { sf: 'arrow.up', d: 'M12 19V5 M6 11l6-6 6 6' },
+  upload: { sf: 'square.and.arrow.up', d: 'M12 3v12 M7.5 7.5 12 3l4.5 4.5 M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6' },
+  map: { sf: 'map', d: 'M9 4 3 6v14l6-2 6 2 6-2V4l-6 2Z M9 4v14 M15 6v14' },
+  photo: { sf: 'photo.on.rectangle', d: 'M4 6h16v13H4Z M4 16l5-5 4 4 3-3 4 4 M15.5 10a1.5 1.5 0 1 0 0-3a1.5 1.5 0 1 0 0 3Z' },
+  arrowLeft: { sf: 'arrow.left', d: 'M19 12H5 M11 6l-6 6 6 6' },
+  arrowRight: { sf: 'arrow.right', d: 'M5 12h14 M13 6l6 6-6 6' },
+  external: { sf: 'arrow.up.right', d: 'M8 16 16 8 M9 8h7v7' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

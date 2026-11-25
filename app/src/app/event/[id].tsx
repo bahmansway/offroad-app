@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Platform, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Hero } from '../../components/Hero';
@@ -8,6 +8,8 @@ import {
   NavScreen, PillButton, Section, Txt, useTheme,
 } from '../../components/ui';
 import { ActionSheet, MoreMenu, type SheetAction } from '../../components/ActionSheet';
+import { useNavigate } from '../../components/NavigateSheet';
+import { shareLink } from '../../lib/share';
 import { EventDate, statusTone } from '../../components/EventCard';
 import { CarAndSeats } from '../../components/CarPicker';
 import { carTitle, photoUri } from '../../components/Rows';
@@ -53,6 +55,7 @@ export default function EventScreen() {
   const [seats, setSeats] = useState(0);
   const [menuFor, setMenuFor] = useState<EventParticipant | null>(null);
   const notifications = useNotifications();
+  const nav = useNavigate();
   const [calEntry, setCalEntry] = useState<StoredCalendarEntry | null>(null);
   const [calNote, setCalNote] = useState<{ text: string; error: boolean } | null>(null);
 
@@ -222,13 +225,12 @@ export default function EventScreen() {
 
   function openMaps() {
     if (!loc) return;
-    const { lat, lng } = loc;
-    const url = Platform.select({
-      ios: `http://maps.apple.com/?daddr=${lat},${lng}`,
-      android: `geo:${lat},${lng}?q=${lat},${lng}`,
-      default: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=13/${lat}/${lng}`,
-    });
-    Linking.openURL(url);
+    nav.open({ lat: loc.lat, lng: loc.lng, name: where });
+  }
+  async function share() {
+    const r = await shareLink('event', ev!.id, ev!.title);
+    if (r === 'copied') setNote({ text: t('post.linkCopied'), error: false });
+    else if (r === 'failed') setNote({ text: t('post.shareFailed'), error: true });
   }
 
   function personActions(p: EventParticipant): SheetAction[] {
@@ -354,12 +356,13 @@ export default function EventScreen() {
                   <IconButton icon="camera" label={ev.coverUrl ? t('events.coverChange') : t('events.coverAdd')} onPress={changeCover} style={{ backgroundColor: 'transparent', width: 48 }} />
                 </GlassView>
               ) : null}
-              {isOrg ? null : (
-                <MoreMenu
-                  title={ev.title}
-                  actions={[{ label: t('events.report'), destructive: true, onPress: () => router.push(user ? { pathname: '/report', params: { targetType: 'event', targetId: String(ev.id) } } : '/login') }]}
-                />
-              )}
+              <MoreMenu
+                title={ev.title}
+                actions={[
+                  { label: t('spot.shareLink'), onPress: share },
+                  ...(isOrg ? [] : [{ label: t('events.report'), destructive: true, onPress: () => router.push(user ? { pathname: '/report', params: { targetType: 'event', targetId: String(ev.id) } } : '/login') }]),
+                ]}
+              />
             </>
           }
         />
@@ -411,7 +414,7 @@ export default function EventScreen() {
               <View style={{ height: 170, borderRadius: 20, overflow: 'hidden' }} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
                 <SpotMap spots={NO_SPOTS} picked={loc} center={loc} zoom={11} label={where} pinLabel={() => where} errorCompact />
               </View>
-              <PillButton title={t('events.openInMaps')} icon="navigate" variant="gray" size="medium" onPress={openMaps} />
+              <PillButton title={t('nav.button')} icon="navigate" variant="gray" size="medium" onPress={openMaps} />
             </View>
           ) : null}
 
@@ -459,6 +462,7 @@ export default function EventScreen() {
 
         </View>
       </ScrollView>
+      {nav.sheet}
       <ActionSheet
         visible={!!menuFor}
         title={menuFor ? t('events.participantActions', { name: menuFor.user.displayName }) : undefined}

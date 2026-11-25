@@ -57,8 +57,10 @@ interface ChatValue {
   reloadInvites: () => Promise<void>;
   /** fetch the tab badge total again */
   refreshUnread: () => void;
-  /** v4: pending incoming friend requests (Profile tab badge) */
+  /** v4: pending incoming friend requests (old servers only; the v6 app shows newFollowers instead) */
   friendRequests: number;
+  /** v6: new followers since I last opened my followers list (Profile tab badge, bell) */
+  newFollowers: number;
   /** v4: Söhbət tab badge = unread messages + clan invites */
   chatBadge: number;
   /** v4: put a conversation into the list (new DM / group). Pass the `session()` taken before the
@@ -119,7 +121,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         // older server without /me/badges: messages only
         api.unreadTotal().then((r) => {
           if (my === session.current && typeof r?.total === 'number') {
-            setBadges((b) => ({ friendRequests: b?.friendRequests ?? 0, clanInvites: b?.clanInvites ?? 0, messages: r.total }));
+            setBadges((b) => ({ friendRequests: b?.friendRequests ?? 0, clanInvites: b?.clanInvites ?? 0, newFollowers: b?.newFollowers ?? 0, messages: r.total }));
           }
         }).catch(() => { /* keep the last value */ });
       });
@@ -379,14 +381,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const unread = badges?.messages ?? totalUnread(conversations);
   const friendRequests = badges?.friendRequests ?? 0;
+  const newFollowers = badges?.newFollowers ?? 0;
   const chatBadge = chatBadgeTotal({ messages: unread, clanInvites: badges?.clanInvites ?? invites?.length ?? 0 });
   const value = useMemo<ChatValue>(
     () => ({
       conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm,
-      on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop,
+      on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, newFollowers, chatBadge, upsert, drop,
       session: currentSession, openId,
     }),
-    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm, on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, chatBadge, upsert, drop, currentSession, openId],
+    [conversations, error, unread, status, reload, setOpen, markRead, subscribe, onCatchUp, openDm, on, setMuted, patch, invites, reloadInvites, refreshUnread, friendRequests, newFollowers, chatBadge, upsert, drop, currentSession, openId],
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

@@ -58,27 +58,13 @@ function ChatTab() {
 
 function ChatList() {
   const { t } = useI18n();
-  const { conversations, error, reload, status, friendRequests } = useChat();
+  const { conversations, error, reload, status } = useChat();
   const clanChats = (conversations ?? []).filter((c) => c.type === 'clan');
   const dms = (conversations ?? []).filter((c) => c.type === 'dm' || c.type === 'group');
   const events = (conversations ?? []).filter((c) => c.type === 'event');
   return (
     <>
       {status === 'offline' ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite">{t('chat.offline')}</Txt> : null}
-      {friendRequests > 0 ? (
-        <Section>
-          <Cell
-            title={t('friends.tabIncoming')}
-            subtitle={t('tabs.friendRequests', { count: friendRequests })}
-            left={<IconTile icon="invite" />}
-            right={<Badge text={String(friendRequests)} />}
-            chevron
-            onPress={() => router.push('/friends?tab=in')}
-            accessibilityRole="link"
-            accessibilityLabel={`${t('friends.title')}, ${t('tabs.friendRequests', { count: friendRequests })}`}
-          />
-        </Section>
-      ) : null}
       {clanChats.length ? (
         <Section header={t('chat.myClan')}>
           {clanChats.map((c) => <ConversationCell key={c.id} conv={c} />)}

@@ -35,7 +35,7 @@ function Settings() {
 
   const rows: { key: Key; icon: 'chat' | 'people' | 'invite' | 'events'; hint: string }[] = [
     { key: 'messages', icon: 'chat', hint: t('notifications.messagesHint') },
-    { key: 'friends', icon: 'people', hint: t('notifications.friendsHint') },
+    { key: 'social', icon: 'people', hint: t('notifications.socialHint') },
     { key: 'clans', icon: 'invite', hint: t('notifications.clansHint') },
     { key: 'events', icon: 'events', hint: t('notifications.eventsHint') },
   ];
@@ -71,7 +71,7 @@ function Settings() {
                 key={r.key}
                 title={t(`notifications.${r.key}`)}
                 subtitle={r.hint}
-                value={s[r.key]}
+                value={s[r.key] ?? true}
                 onValueChange={(v) => toggle(r.key, v)}
                 left={<IconTile icon={r.icon} />}
                 last={i === rows.length - 1}

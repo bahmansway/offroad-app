@@ -6,7 +6,7 @@ import {
 } from '../../components/ui';
 import { PersonCell } from '../../components/ChatRows';
 import { RequireAuth } from '../../components/RequireAuth';
-import { api } from '../../lib/api';
+import { api, loadMutualFollows } from '../../lib/api';
 import { useChat } from '../../lib/chat';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
@@ -28,7 +28,7 @@ function NewChat() {
   const [query, setQuery] = useState('');
   const { user } = useAuth();
   const search = useSearch(query, null, user?.id ?? null);
-  const friends = useAsync(() => api.friends(), []);
+  const friends = useAsync(async () => ({ items: user ? await loadMutualFollows(user.id) : [] }), [user?.id]);
   const [busy, setBusy] = useState<Id | null>(null);
   const [error, setError] = useState<string | null>(null);
 

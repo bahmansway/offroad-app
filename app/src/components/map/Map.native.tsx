@@ -5,6 +5,8 @@ import {
   BAKU_CENTER, DEFAULT_ZOOM, MAPLIBRE_CDN_VERSION, MAPLIBRE_SRI, mapStyleUrl, pinCss,
   buildPins, isAllowedExternalLink, parseMapMessage, type MapProps,
 } from './shared';
+import { PIN_LAYERS_JS, pinPalette, safeJson } from './pinLayers';
+import { diffPins, isEmptyDiff, type PinPoint } from '../../lib/mapData';
 import { palettes, type Scheme } from '../../lib/theme';
 import { MapErrorCard } from '../ui/States';
 import { useReduceMotion } from '../ui/Motifs';
@@ -34,7 +36,10 @@ function buildHtml(center: [number, number], zoom: number, scheme: Scheme, reduc
     attributionControl:{compact:true},dragRotate:false,pitchWithRotate:false});
   map.touchZoomRotate.disableRotation();
   var markers=[];
-  map.on('click',function(e){ var p=e.lngLat.wrap(); send({type:'mapPress',lat:p.lat,lng:p.lng}); });
+  var pins=(${PIN_LAYERS_JS})(map,{pal:${safeJson(pinPalette(scheme))},
+    onPin:function(id){ send({type:'spotPress',id:id}); },
+    onRegion:function(lat,lng,z){ send({type:'region',lat:lat,lng:lng,zoom:z}); }});
+  map.on('click',function(e){ if(pins.hit(e.point)) return; var p=e.lngLat.wrap(); send({type:'mapPress',lat:p.lat,lng:p.lng}); });
   var loadedOnce=false;
   map.on('load',function(){ loadedOnce=true; send({type:'loaded'}); });
   // A style/tile network failure before the FIRST load counts as "map failed" (same rule as the web map);
@@ -45,13 +50,14 @@ function buildHtml(center: [number, number], zoom: number, scheme: Scheme, reduc
     var a=e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if(a){ e.preventDefault(); send({type:'openLink',url:a.href}); }
   },true);
-  window.__setPins=function(pins){
+  // Only the changed pins come in (added / changed / removed); the page keeps the rest.
+  window.__pinDiff=function(d){ pins.diff(d); };
+  window.__select=function(id){ pins.select(id); };
+  // The "picked" pin (new spot / meeting point) stays a DOM marker.
+  window.__setPicked=function(list){
     markers.forEach(function(m){m.remove();}); markers=[];
-    pins.forEach(function(p){
-      var el=document.createElement('button'); el.type='button';
-      el.className=p.kind==='picked'?'or-pin or-pin--picked':(p.className==='or-pin or-pin--camp'?'or-pin or-pin--camp':'or-pin');
-      el.setAttribute('aria-label',p.label); el.innerHTML=p.html;
-      if(p.kind!=='picked'){ el.addEventListener('click',function(ev){ ev.stopPropagation(); send({type:'spotPress',id:p.id}); }); }
+    list.forEach(function(p){
+      var el=document.createElement('div'); el.className='or-pin or-pin--picked'; el.setAttribute('aria-hidden','true'); el.innerHTML=p.html;
       markers.push(new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([p.lng,p.lat]).addTo(map));
     });
   };
@@ -60,7 +66,7 @@ function buildHtml(center: [number, number], zoom: number, scheme: Scheme, reduc
     var o={center:[Number(lng),Number(lat)]}; if(z!==null && isFinite(z)) o.zoom=Number(z); map.jumpTo(o);
   };
   // Light/dark switch: new tile style + pin CSS. Both values come from our own constants.
-  window.__setScheme=function(styleUrl,css){ map.setStyle(styleUrl); var el=document.getElementById('pins'); if(el) el.textContent=css; };
+  window.__setScheme=function(styleUrl,css,pal){ map.setStyle(styleUrl); pins.palette(pal); var el=document.getElementById('pins'); if(el) el.textContent=css; };
   window.__getCenter=function(reqId){ var c=map.getCenter().wrap(); send({type:'center',lat:c.lat,lng:c.lng,reqId:reqId}); };
   send({type:'ready'});
 })();
@@ -71,7 +77,8 @@ const num = (n: number) => (Number.isFinite(n) ? String(Number(n)) : 'null');
 
 export default function SpotMap(props: MapProps) {
   const web = useRef<WebViewHandle>(null);
-  const [ready, setReady] = useState(false);
+  /** bumped on every 'ready' from the page (a reloaded page must get every pin again) */
+  const [ready, setReady] = useState(0);
   const [failed, setFailed] = useState(false);
   /** bumping this remounts the WebView ("Try again" on the error card) */
   const [attempt, setAttempt] = useState(0);
@@ -106,18 +113,30 @@ export default function SpotMap(props: MapProps) {
     [attempt],
   );
 
-  const pins = useMemo(() => buildPins(props, props.label), [props.spots, props.picked?.lat, props.picked?.lng, props.pinLabel]);
+  // Spot pins: only what changed goes into the WebView. `shown` mirrors what the page has now.
+  const shown = useRef(new Map<string, PinPoint>());
+  useEffect(() => {
+    if (!ready) return;
+    const { diff, next } = diffPins(shown.current, props.spots);
+    shown.current = next;
+    if (!isEmptyDiff(diff)) web.current?.injectJavaScript(`window.__pinDiff(${safeJson(diff)});true;`);
+  }, [ready, props.spots]);
 
   useEffect(() => {
-    // JSON.stringify output is a valid JS literal; labels/ids are escaped inside it.
-    if (ready) web.current?.injectJavaScript(`window.__setPins(${JSON.stringify(pins)});true;`);
-  }, [ready, pins]);
+    if (ready) web.current?.injectJavaScript(`window.__select(${safeJson(props.selectedId ?? null)});true;`);
+  }, [ready, props.selectedId]);
+
+  // The "picked" pin (new spot / meeting point) is the only DOM marker left.
+  const picked = useMemo(() => buildPins({ spots: [], picked: props.picked, pinLabel: props.pinLabel }, props.label), [props.picked?.lat, props.picked?.lng]);
+  useEffect(() => {
+    if (ready) web.current?.injectJavaScript(`window.__setPicked(${safeJson(picked)});true;`);
+  }, [ready, picked]);
 
   useEffect(() => {
     if (ready && shownScheme.current !== scheme) {
       shownScheme.current = scheme;
       shownMotion.current = reduceMotion;
-      web.current?.injectJavaScript(`window.__setScheme(${JSON.stringify(mapStyleUrl(scheme))},${JSON.stringify(pinCss(scheme, reduceMotion))});true;`);
+      web.current?.injectJavaScript(`window.__setScheme(${safeJson(mapStyleUrl(scheme))},${safeJson(pinCss(scheme, reduceMotion))},${safeJson(pinPalette(scheme))});true;`);
     } else if (ready && shownMotion.current !== reduceMotion) {
       // Reduce Motion changed (or its first answer arrived): swap only the pin CSS
       shownMotion.current = reduceMotion;
@@ -140,11 +159,12 @@ export default function SpotMap(props: MapProps) {
     const m = parseMapMessage(e.nativeEvent.data);
     if (!m) return;
     switch (m.type) {
-      case 'ready': setReady(true); break;
+      case 'ready': shown.current = new Map(); setReady((n) => n + 1); break;
       case 'loaded': setFailed(false); break;
       case 'failed': setFailed(true); break;
       case 'spotPress': cb.current.onSpotPress?.(m.id); break;
       case 'mapPress': cb.current.onMapPress?.(m.lat, m.lng); break;
+      case 'region': cb.current.onRegionChange?.({ lat: m.lat, lng: m.lng, zoom: m.zoom }); break;
       case 'center': {
         const r = centerReqs.current.get(m.reqId);
         if (r) { centerReqs.current.delete(m.reqId); r({ lat: m.lat, lng: m.lng }); }
@@ -188,7 +208,7 @@ export default function SpotMap(props: MapProps) {
             paddingLeft: props.errorInsets.left, paddingRight: props.errorInsets.right,
           } : null]}
           compact={props.errorCompact}
-          onRetry={props.errorCompact ? undefined : () => { setFailed(false); setReady(false); shownScheme.current = scheme; setAttempt((a) => a + 1); }}
+          onRetry={props.errorCompact ? undefined : () => { setFailed(false); setReady(0); shownScheme.current = scheme; shown.current = new Map(); setAttempt((a) => a + 1); }}
         />
       ) : null}
     </View>

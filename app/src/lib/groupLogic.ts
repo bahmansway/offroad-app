@@ -72,6 +72,7 @@ export function groupErrorMessage(e: unknown, t: T, fallback: (e: unknown) => st
     const m = e.message;
     if (e.code === 'FORBIDDEN') {
       if (/only add your friends/i.test(m)) return t('group.errors.notFriends');
+      if (/follow you and whom you follow/i.test(m)) return t('group.notMutual');
       if (/admin/i.test(m)) return t('group.errors.notAdmin');
       return t('group.errors.noAccess');
     }

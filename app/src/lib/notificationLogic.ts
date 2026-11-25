@@ -37,6 +37,11 @@ export function routeForNotification(data: NotificationData): string | null {
       return '/friends?tab=in';
     case 'friend_accepted':
       return '/friends';
+    case 'post_like':
+    case 'post_comment':
+      return okId(data.postId) ? `/post/${data.postId}` : null;
+    case 'follow':
+      return okId(data.userId) ? `/user/${data.userId}` : null;
     case 'clan_invite':
       return '/clans';
     case 'clan_request':

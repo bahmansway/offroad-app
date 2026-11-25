@@ -1,19 +1,20 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { EmptyState, ErrorState, LargeTitleScreen, LoadingState, PillButton, SectionHeader, SegmentedControl } from '../../components/ui';
-import { EventCard } from '../../components/EventCard';
-import { api } from '../../lib/api';
-import { useAuth } from '../../lib/auth';
-import { useChat } from '../../lib/chat';
-import { useI18n } from '../../lib/i18n';
-import { errorMessage } from '../../lib/errors';
-import { groupByWeek } from '../../lib/eventLogic';
-import type { EventScope, EventSummary } from '../../lib/types';
+import { EmptyState, ErrorState, LargeTitleScreen, LoadingState, PillButton, SectionHeader, SegmentedControl } from '../components/ui';
+import { EventCard } from '../components/EventCard';
+import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { useChat } from '../lib/chat';
+import { useI18n } from '../lib/i18n';
+import { errorMessage } from '../lib/errors';
+import { groupByWeek } from '../lib/eventLogic';
+import type { EventScope, EventSummary } from '../lib/types';
 
 const PAGE = 20;
 
-export default function EventsTab() {
+/** All events. v6: no longer a tab; opened from Home ("Bütün tədbirlər") and Explore. */
+export default function EventsScreen() {
   const { t } = useI18n();
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -96,6 +97,7 @@ export default function EventsTab() {
 
   return (
     <LargeTitleScreen
+      back
       title={t('events.title')}
       right={<PillButton title={t('events.createShort')} icon="plus" variant="tinted" size="small" onPress={create} accessibilityLabel={t('events.create')} />}
       onRefresh={async () => { setRefreshing(true); await load(scope); setRefreshing(false); }}

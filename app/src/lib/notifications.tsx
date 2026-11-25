@@ -301,7 +301,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }, [enqueue]);
 
   // ---- iOS app badge follows the tab badges while the app is open ----
-  const total = userId ? chat.chatBadge + chat.friendRequests : 0;
+  // v6: same as the server's iOS icon number (messages + clan invites + new followers)
+  const total = userId ? chat.chatBadge + chat.newFollowers : 0;
   useEffect(() => {
     if (native.supported && !loading) native.setBadge(total);
   }, [total, loading]);

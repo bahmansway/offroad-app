@@ -9,7 +9,7 @@ type T = (key: string, params?: Record<string, string | number>) => string;
  * - create: 429 = hourly limit on new spots/cars/mods
  * - report: 404 = the reported thing was deleted
  * - car:    409 = 20-car limit reached
- * - photo:  409 = 20 MB photo storage full, 413/415 = bad or too big file
+ * - photo:  409 = 50 MB photo storage full, 413/415 = bad or too big file
  */
 export type ErrorContext = 'default' | 'auth' | 'create' | 'report' | 'car' | 'photo';
 

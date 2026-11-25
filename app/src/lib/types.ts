@@ -187,6 +187,12 @@ export interface PublicUser {
   requestId?: Id | null;
   friendCount?: number;
   mutualFriends?: number;
+  // v6 follows
+  followerCount?: number;
+  followingCount?: number;
+  postCount?: number;
+  isFollowing?: boolean;
+  followsMe?: boolean;
 }
 
 export interface AuthResponse {
@@ -200,7 +206,7 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-export type ReportTarget = 'spot' | 'car' | 'user' | 'message' | 'clan' | 'event';
+export type ReportTarget = 'spot' | 'car' | 'user' | 'message' | 'clan' | 'event' | 'post' | 'comment';
 
 export type ErrorCode =
   | 'VALIDATION' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'NOT_FOUND' | 'CONFLICT' | 'RATE_LIMITED'
@@ -448,13 +454,19 @@ export interface FriendRequestResult {
 
 export interface Badges {
   messages: number;
+  /** v4, kept by the server for old apps; the v6 app ignores it */
   friendRequests: number;
   clanInvites: number;
+  /** v6: followers since I last opened my followers list */
+  newFollowers?: number;
 }
 
 export interface UserSearchItem extends UserRef {
   city: string | null;
+  /** v6: mutual follow */
   isFriend: boolean;
+  /** v6: I follow them */
+  isFollowing?: boolean;
 }
 
 export interface ClanSearchItem {
@@ -487,6 +499,8 @@ export interface LeaderboardBreakdown {
   attended: number;
   cars: number;
   ratings: number;
+  /** v6 */
+  posts?: number;
 }
 
 export interface LeaderboardItem {
@@ -520,4 +534,80 @@ export interface NotificationSettings {
   friends: boolean;
   clans: boolean;
   events: boolean;
+  /** v6: likes, comments, new followers (default on) */
+  social?: boolean;
+}
+
+// ---------- v6 photo posts, follows, activity ----------
+export interface PostPhoto { url: string; width: number; height: number }
+
+export interface PostAuthor {
+  id: Id;
+  displayName: string;
+  avatarUrl: string | null;
+  clan: { id: Id; name: string; tag: string } | null;
+}
+
+export interface PostCar { id: Id; make: string; model: string; year: number; photoUrl: string | null }
+export interface PostSpot { id: Id; name: string; type: SpotType; difficulty: number | null; lat: number; lng: number }
+
+export interface Post {
+  id: Id;
+  author: PostAuthor;
+  photos: PostPhoto[];
+  caption: string;
+  car: PostCar | null;
+  spot: PostSpot | null;
+  likeCount: number;
+  commentCount: number;
+  likedByMe: boolean;
+  savedByMe: boolean;
+  status: 'draft' | 'published';
+  createdAt: string;
+  editedAt: string | null;
+  /** feed only: a recent post by someone I don't follow (I follow fewer than 3 people) */
+  suggested?: boolean;
+}
+
+export interface PostInput {
+  caption?: string;
+  carId?: Id | null;
+  spotId?: Id | null;
+}
+
+export interface Comment {
+  id: Id;
+  postId: Id;
+  author: UserRef;
+  text: string;
+  createdAt: string;
+  canDelete: boolean;
+}
+
+export interface Page<T> { items: T[]; nextCursor: string | null }
+
+/** POST / DELETE /users/:id/follow (counts are the other user's) */
+export interface FollowState {
+  isFollowing: boolean;
+  followsMe: boolean;
+  followerCount: number;
+  followingCount: number;
+}
+
+export interface FollowListItem {
+  user: UserRef & { city: string | null };
+  isFollowing: boolean;
+  followsMe: boolean;
+  isMe: boolean;
+  since: string;
+}
+
+export interface ActivityItem {
+  id: string;
+  type: 'like' | 'comment' | 'follow';
+  actor: UserRef;
+  post: { id: Id; photoUrl: string | null } | null;
+  comment: { id: Id; text: string } | null;
+  isFollowing: boolean;
+  createdAt: string;
 }

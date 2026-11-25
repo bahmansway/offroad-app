@@ -1,215 +1,31 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import Constants from 'expo-constants';
-import { CarCell, photoUri } from '../../components/Rows';
-import {
-  Avatar, Badge, Cell, EmptyState, Icon, FormError, IconTile, LargeTitleScreen, PillButton, Section, SegmentedControl, Txt,
-  useTheme,
-} from '../../components/ui';
-import { api } from '../../lib/api';
+import React from 'react';
+import { View } from 'react-native';
+import { router } from 'expo-router';
+import { Cell, EmptyState, IconTile, LargeTitleScreen, LoadingState, PillButton, Section } from '../../components/ui';
+import { ProfileView } from '../../components/ProfileView';
 import { useAuth } from '../../lib/auth';
 import { useI18n } from '../../lib/i18n';
-import { confirmAsync } from '../../lib/dialogs';
-import { errorMessage } from '../../lib/errors';
-import { pickPhoto } from '../../lib/photos';
-import { radius } from '../../lib/theme';
-import type { Lang } from '../../lib/format';
-import type { CarSummary, Leaderboard } from '../../lib/types';
-import { useChat } from '../../lib/chat';
-import { formatPoints, rankText } from '../../lib/leaderboardLogic';
 
-export default function ProfileScreen() {
-  const { t, lang, setLang } = useI18n();
-  const { c, pref } = useTheme();
-  const { user, logout, offline, retry, updateUser, refreshUser } = useAuth();
-  const [cars, setCars] = useState<CarSummary[] | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [myBoard, setMyBoard] = useState<Leaderboard['me'] | undefined>(undefined);
-  const boardSeq = useRef(0);
-  const boardUser = useRef<string | null>(user?.id ?? null);
-  // another account (or logged out): forget the old rank at once and drop answers in flight
-  useEffect(() => {
-    boardUser.current = user?.id ?? null;
-    boardSeq.current++;
-    setMyBoard(undefined);
-  }, [user?.id]);
-  const { friendRequests, refreshUnread } = useChat();
-
-  useFocusEffect(useCallback(() => {
-    if (!user) { setCars(null); return; }
-    api.cars(user.id).then((r) => setCars(r.items)).catch(() => setCars([]));
-    // Current car may have been edited, re-photographed or deleted elsewhere.
-    refreshUser().catch(() => {});
-    // only the newest answer for the user still logged in may show
-    const ticket = ++boardSeq.current;
-    const forUser = user.id;
-    api.leaderboard('month').then((b) => {
-      if (ticket === boardSeq.current && boardUser.current === forUser) setMyBoard(b.me);
-    }).catch(() => {
-      if (ticket === boardSeq.current) setMyBoard(undefined);
-    });
-    refreshUnread();
-  }, [user?.id]));
-
-  async function doLogout() {
-    if (await confirmAsync(t('profile.logoutConfirm'), t('profile.logout'), t('common.cancel'))) await logout();
-  }
-
-  async function changeAvatar() {
-    setError(null);
-    const res = await pickPhoto('avatar');
-    if (!res.ok) {
-      if (res.reason !== 'cancelled') setError(t(res.reason === 'denied' ? 'profile.photoDenied' : res.reason === 'tooBig' ? 'profile.photoTooBig' : 'profile.photoFailed'));
-      return;
-    }
-    setUploading(true);
-    try {
-      const r = await api.uploadAvatar(res.bytes);
-      updateUser({ avatarUrl: r.avatarUrl });
-    } catch (e) {
-      setError(errorMessage(e, t, 'photo'));
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  const appearanceLabel = { auto: t('profile.appearanceAuto'), light: t('profile.appearanceLight'), dark: t('profile.appearanceDark') }[pref];
-  const version = Constants.expoConfig?.version ?? '';
-
-  const settings = (
-    <Section header={t('profile.app')}>
-      <Cell
-        title={t('profile.language')}
-        left={<IconTile icon="globe" bg={c.blue} />}
-        right={
-          <SegmentedControl<Lang>
-            compact
-            label={t('profile.language')}
-            value={lang}
-            onChange={setLang}
-            options={[{ value: 'az', label: 'AZ', a11y: 'Azərbaycanca' }, { value: 'en', label: 'EN', a11y: 'English' }]}
-          />
-        }
-        minHeight={56}
-      />
-      <Cell title={t('profile.appearance')} value={appearanceLabel} left={<IconTile icon="moon" bg={c.indigo} />} onPress={() => router.push('/about?section=appearance')} />
-      {user ? (
-        <Cell
-          title={t('notifications.title')}
-          subtitle={t('notifications.rowSubtitle')}
-          left={<IconTile icon="bell" />}
-          onPress={() => router.push('/notifications')}
-          accessibilityRole="link"
-        />
-      ) : null}
-      <Cell title={t('profile.about')} left={<IconTile icon="info" bg={c.gray} />} onPress={() => router.push('/about')} />
-    </Section>
-  );
-
-  if (!user) {
-    return (
-      <LargeTitleScreen title={t('profile.title')}>
-        {offline ? (
-          <EmptyState icon="info" title={t('errors.offline')} actionLabel={t('common.retry')} onAction={retry} />
-        ) : (
-          <View style={{ gap: 12 }}>
-            <EmptyState icon="profile" title={t('profile.loginToSee')} />
-            <PillButton title={t('common.login')} onPress={() => router.push('/login')} />
-            <PillButton title={t('auth.registerTitle')} variant="gray" onPress={() => router.push('/register')} />
-          </View>
-        )}
-        {settings}
-        <Txt variant="footnote" tone="label2" center>{t('common.version', { v: version })}</Txt>
-      </LargeTitleScreen>
-    );
-  }
-
-  const current = user.currentCar ?? null;
-  const subtitle = [user.city, user.email].filter(Boolean).join(' · ');
-
+/** Profil tab: my v6 profile (posts grid, garage, saved). Settings live behind the gear. */
+export default function ProfileTab() {
+  const { t } = useI18n();
+  const { user, loading, offline, retry } = useAuth();
+  if (loading) return <LoadingState />;
+  if (user) return <ProfileView userId={user.id} tabRoot />;
   return (
     <LargeTitleScreen title={t('profile.title')}>
-      {/* identity card */}
-      <View style={{ backgroundColor: c.card, borderRadius: radius.card, flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, paddingHorizontal: 16 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={user.avatarUrl ? t('profile.changePhoto') : t('profile.addPhoto')}
-          onPress={changeAvatar}
-          disabled={uploading}
-        >
-          <Avatar uri={photoUri(user.avatarUrl)} name={user.displayName} size={60} />
-          <View style={{ position: 'absolute', right: -2, bottom: -2, width: 24, height: 24, borderRadius: 12, backgroundColor: c.tint, borderWidth: 2, borderColor: c.card, alignItems: 'center', justifyContent: 'center' }}>
-            {uploading ? <ActivityIndicator size="small" color={c.onTint} /> : <Icon name="camera" size={13} color={c.onTint} strokeWidth={2.4} />}
-          </View>
-        </Pressable>
-        <Pressable
-          accessibilityRole="link"
-          accessibilityLabel={`${user.displayName}, ${t('profile.publicProfile')}`}
-          onPress={() => router.push(`/user/${user.id}`)}
-          style={({ pressed }) => [{ flex: 1, minWidth: 0, gap: 2, flexDirection: 'row', alignItems: 'center' }, pressed && { opacity: 0.6 }]}
-        >
-          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <Txt variant="title3" numberOfLines={1}>{user.displayName}</Txt>
-            {subtitle ? <Txt variant="subhead" tone="label2" numberOfLines={1}>{subtitle}</Txt> : null}
-            {user.bio ? <Txt variant="footnote" tone="label2" numberOfLines={2}>{user.bio}</Txt> : null}
-          </View>
-        </Pressable>
-      </View>
-      <FormError message={error} />
-
+      {offline ? (
+        <EmptyState icon="info" title={t('errors.offline')} actionLabel={t('common.retry')} onAction={retry} />
+      ) : (
+        <View style={{ gap: 12 }}>
+          <EmptyState icon="profile" title={t('profile.loginToSee')} />
+          <PillButton title={t('common.login')} onPress={() => router.push('/login')} />
+          <PillButton title={t('auth.registerTitle')} variant="gray" onPress={() => router.push('/register')} />
+        </View>
+      )}
       <Section>
-        <Cell title={t('profile.edit')} left={<IconTile icon="edit" />} onPress={() => router.push('/profile/edit')} />
-        <Cell
-          title={t('friends.row')}
-          subtitle={friendRequests ? t('tabs.friendRequests', { count: friendRequests }) : t('friends.rowSubtitle')}
-          left={<IconTile icon="people" tone="forest" />}
-          right={friendRequests ? <Badge text={String(friendRequests)} /> : undefined}
-          chevron
-          onPress={() => router.push(friendRequests ? '/friends?tab=in' : '/friends')}
-          accessibilityRole="link"
-        />
-        <Cell
-          title={t('profile.pointsRow')}
-          subtitle={myBoard === undefined ? undefined : myBoard?.rank
-            ? t('board.myMonth', { rank: rankText(myBoard.rank), points: formatPoints(myBoard.points, lang) })
-            : t('board.myMonthNone')}
-          left={<IconTile icon="trophy" tone="sand" />}
-          onPress={() => router.push('/leaderboard')}
-          accessibilityRole="link"
-        />
+        <Cell title={t('settings.title')} left={<IconTile icon="gear" />} onPress={() => router.push('/settings')} accessibilityRole="link" />
       </Section>
-
-      <Section header={t('profile.currentCar')} footer={t('profile.currentCarHint')}>
-        {current ? (
-          <CarCell car={current} onPress={() => router.push('/profile/current-car')} />
-        ) : (
-          <Cell title={t('profile.chooseCurrentCar')} action left={<IconTile icon="garage" />} onPress={() => router.push('/profile/current-car')} />
-        )}
-      </Section>
-
-      <Section
-        header={t('profile.myCars')}
-        right={<Pressable accessibilityRole="button" onPress={() => router.push('/car/add')} hitSlop={8} style={{ minHeight: 28, justifyContent: 'center' }}><Txt variant="subhead" tone="tint">{t('garage.addModShort')}</Txt></Pressable>}
-      >
-        {cars === null ? <View style={{ padding: 16 }}><ActivityIndicator color={c.label2} /></View> : null}
-        {cars?.length === 0 ? <Cell title={t('garage.addCar')} action left={<IconTile icon="plus" />} onPress={() => router.push('/car/add')} /> : null}
-        {cars?.map((car) => <CarCell key={car.id} car={car} onPress={() => router.push(`/car/${car.id}`)} />)}
-      </Section>
-
-      {settings}
-
-      <Section header={t('profile.account')}>
-        {user.email ? <Cell title={t('profile.email')} value={user.email} left={<IconTile icon="mail" bg={c.gray} />} /> : null}
-        <Cell title={t('profile.publicProfile')} left={<IconTile icon="user" bg={c.gray} />} onPress={() => router.push(`/user/${user.id}`)} />
-      </Section>
-
-      <Section>
-        <Cell title={t('profile.logout')} destructive center chevron={false} onPress={doLogout} />
-      </Section>
-      <Txt variant="footnote" tone="label2" center>{t('common.version', { v: version })}</Txt>
     </LargeTitleScreen>
   );
 }
-

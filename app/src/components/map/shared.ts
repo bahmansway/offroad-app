@@ -40,9 +40,14 @@ export interface MapProps {
   ref?: React.Ref<MapHandle>;
   /** light/dark map style and pin colours (default light) */
   scheme?: Scheme;
+  /** v6: the tapped pin, drawn orange on top */
+  selectedId?: string | null;
+  /** v6: map stopped moving (debounced 250 ms inside the map) */
+  onRegionChange?: (r: { lat: number; lng: number; zoom: number }) => void;
 }
 
-/** Data for one marker, ready to send to the DOM (web) or the WebView (native). */
+/** Data for one DOM marker. v6: spot pins are a clustered GeoJSON layer (pinLayers.ts); only the "picked" pin
+ *  (new spot / meeting point) is still a DOM marker. */
 export interface PinData {
   id: string;
   lat: number;
@@ -140,6 +145,7 @@ export type MapMessage =
   | { type: 'spotPress'; id: string }
   | { type: 'mapPress'; lat: number; lng: number }
   | { type: 'center'; lat: number; lng: number; reqId: number }
+  | { type: 'region'; lat: number; lng: number; zoom: number }
   | { type: 'openLink'; url: string };
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -163,6 +169,9 @@ export function parseMapMessage(data: string): MapMessage | null {
     case 'center':
       return finite(m.lat) && finite(m.lng) && finite(m.reqId) && Math.abs(m.lat) <= 90 && Math.abs(m.lng) <= 180
         ? { type: 'center', lat: m.lat, lng: m.lng, reqId: m.reqId } : null;
+    case 'region':
+      return finite(m.lat) && finite(m.lng) && finite(m.zoom) && Math.abs(m.lat) <= 90 && Math.abs(m.lng) <= 180 && m.zoom >= 0 && m.zoom <= 24
+        ? { type: 'region', lat: m.lat, lng: m.lng, zoom: m.zoom } : null;
     case 'openLink':
       return typeof m.url === 'string' && isAllowedExternalLink(m.url) ? { type: 'openLink', url: m.url } : null;
     default:

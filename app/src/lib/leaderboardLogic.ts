@@ -12,6 +12,7 @@ export const POINT_RULES = {
   minEventMinutes: 60, minCarsGoing: 2,
   car: 5, carsCounted: 2,
   rating: 1, ratingsPerMonth: 20,
+  post: 3, postsPerMonth: 10, postReportersToDrop: 2,
   cacheMinutes: 5,
 } as const;
 
@@ -53,12 +54,12 @@ export function meBarState(board: Pick<Leaderboard, 'me' | 'items'> | null | und
   return { kind: 'ranked', rank, points, inTop: board.items.some((i) => sameId(i.user.id, myId)) };
 }
 
-export const BREAKDOWN_KEYS: (keyof LeaderboardBreakdown)[] = ['spots', 'events', 'attended', 'cars', 'ratings'];
+export const BREAKDOWN_KEYS: (keyof LeaderboardBreakdown)[] = ['spots', 'events', 'attended', 'posts', 'cars', 'ratings'];
 
 /** Non-zero parts of a breakdown, in a fixed order. */
 export function breakdownParts(b: LeaderboardBreakdown | null | undefined): { key: keyof LeaderboardBreakdown; points: number }[] {
   if (!b) return [];
-  return BREAKDOWN_KEYS.filter((k) => (b[k] ?? 0) > 0).map((k) => ({ key: k, points: b[k] }));
+  return BREAKDOWN_KEYS.filter((k) => (b[k] ?? 0) > 0).map((k) => ({ key: k, points: b[k] ?? 0 }));
 }
 
 /** Month index (0–11) and year of the Baku month that starts at `monthStart` (a UTC instant). */

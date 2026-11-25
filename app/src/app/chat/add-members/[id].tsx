@@ -3,7 +3,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { EmptyState, ErrorState, FormError, LoadingState, PillButton, SheetScreen, goBack } from '../../../components/ui';
 import { FriendPicker } from '../../../components/FriendPicker';
 import { RequireAuth } from '../../../components/RequireAuth';
-import { api } from '../../../lib/api';
+import { api, loadMutualFollows } from '../../../lib/api';
+import { useAuth } from '../../../lib/auth';
 import { useChat } from '../../../lib/chat';
 import { useI18n } from '../../../lib/i18n';
 import { errorMessage } from '../../../lib/errors';
@@ -21,10 +22,11 @@ function AddMembers() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useI18n();
   const chat = useChat();
+  const { user } = useAuth();
   const data = useAsync(async () => {
-    const [f, m] = await Promise.all([api.friends(), api.conversationMembers(id)]);
-    return { friends: addableFriends(f.items, m.items), slots: remainingSlots(m.items.length) };
-  }, [id]);
+    const [f, m] = await Promise.all([user ? loadMutualFollows(user.id) : Promise.resolve([]), api.conversationMembers(id)]);
+    return { friends: addableFriends(f, m.items), slots: remainingSlots(m.items.length) };
+  }, [id, user?.id]);
   const [picked, setPicked] = useState<Id[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
