@@ -6,6 +6,7 @@ import { RequireAuth } from '../../../components/RequireAuth';
 import { NotOwner } from '../../../components/NotOwner';
 import { PostMetaFields, type MetaValue } from '../../../components/posts/PostMetaFields';
 import { api } from '../../../lib/api';
+import { ApiError } from '../../../lib/apiClient';
 import { useAuth } from '../../../lib/auth';
 import { useI18n } from '../../../lib/i18n';
 import { errorMessage } from '../../../lib/errors';
@@ -55,7 +56,7 @@ function EditPost() {
       successFeedback();
       close();
     } catch (e) {
-      setError(errorMessage(e, t, 'create'));
+      setError(e instanceof ApiError && e.code === 'RATE_LIMITED' ? t('post.editRate') : errorMessage(e, t));
     } finally {
       setBusy(false);
     }

@@ -304,7 +304,8 @@ export default function ExploreScreen() {
       ) : null}
 
       {/* filter popover: above sheet + tab bar, 32% scrim, anchored 14 px under the filter button */}
-      <Modal visible={filterOpen} transparent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
+      {/* statusBarTranslucent: on Android the modal then starts at the screen top like the page, so insets.top lines up */}
+      <Modal visible={filterOpen} transparent statusBarTranslucent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
         <View style={{ flex: 1 }}>
           <Pressable
             style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.32)' }}

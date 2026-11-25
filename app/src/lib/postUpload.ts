@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { api } from './api';
+import { ApiError } from './apiClient';
 import { MAX_UPLOAD_BYTES, targetSize } from './photos';
 import { MAX_POST_PHOTOS, POST_PHOTO_SIDE } from './postsLogic';
 import type { Id, Post, PostInput } from './types';
@@ -93,8 +94,15 @@ export async function uploadPost(
     const d = await api.createPost(input);
     st.draftId = d.id;
   } else {
-    // caption / car / spot may have changed after a failed try
-    await api.updatePost(st.draftId, input).catch(() => {});
+    // caption / car / spot may have changed after a failed try. A failure here stops the upload (so the post is
+    // never published with the old text); a draft the server already deleted (404) starts over.
+    try {
+      await api.updatePost(st.draftId, input);
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 404)) throw e;
+      Object.assign(st, freshUpload());
+      return uploadPost(st, input, photos, onProgress);
+    }
   }
   // A photo's place in the post = its index; re-sending the same index replaces it.
   for (let i = 0; i < photos.length; i++) {
@@ -115,4 +123,18 @@ export async function uploadPost(
   const post = await api.publishPost(st.draftId);
   st.post = post;
   return post;
+}
+
+/** "Ləğv et" after a failed try: delete the unpublished draft. Already gone (404) or offline: nothing else to do. */
+export async function discardDraft(st: UploadState, del: (id: Id) => Promise<void> = api.deletePost): Promise<'deleted' | 'none' | 'gone' | 'failed'> {
+  if (!st.draftId || st.post) return 'none';
+  const id = st.draftId;
+  try {
+    await del(id);
+    return 'deleted';
+  } catch (e) {
+    return e instanceof ApiError && e.status === 404 ? 'gone' : 'failed';
+  } finally {
+    Object.assign(st, freshUpload());
+  }
 }

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { api, client, onAuthLost } from './api';
+import { clearFeedCache } from './homeLogic';
 import { sessionStateAfterMeError } from './sessionCheck';
 import { rememberRemoval, removalDone, retryRemovals } from './pushCleanup';
 import type { User } from './types';
@@ -100,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     alive.current = true;
     onAuthLost((lastRefreshToken) => {
+      clearFeedCache();
       setUser(null);
       setOffline(false);
       setSessionLost(true);

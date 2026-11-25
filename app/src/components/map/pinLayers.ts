@@ -122,10 +122,14 @@ export const PIN_LAYERS_JS = `function(map, cfg){
   map.on('load', install);
   map.on('style.load', install);
   map.on('styledata', function(){ if (!map.getSource('or')) install(); });
-  map.on('click', 'or-pin', function(e){ var f = e.features && e.features[0]; if (f) { e.originalEvent && e.originalEvent.stopPropagation && e.originalEvent.stopPropagation(); e.orHit = true; cfg.onPin(String(f.properties.id)); } });
-  map.on('click', 'or-sel', function(e){ var f = e.features && e.features[0]; if (f) { e.orHit = true; cfg.onPin(String(f.properties.id)); } });
+  // One tap can hit several of our layers (the orange selected pin sits on top of the same white pin):
+  // only the first handler for a click acts.
+  var lastClick = null;
+  function first(e){ var o = e && e.originalEvent; if (!o) return true; if (o === lastClick) return false; lastClick = o; return true; }
+  map.on('click', 'or-sel', function(e){ var f = e.features && e.features[0]; if (f && first(e)) cfg.onPin(String(f.properties.id)); });
+  map.on('click', 'or-pin', function(e){ var f = e.features && e.features[0]; if (f && first(e)) cfg.onPin(String(f.properties.id)); });
   map.on('click', 'or-cl', function(e){
-    var f = e.features && e.features[0]; if (!f) return; e.orHit = true;
+    var f = e.features && e.features[0]; if (!f || !first(e)) return;
     var src = map.getSource('or'), center = f.geometry.coordinates;
     var p = src.getClusterExpansionZoom(f.properties.cluster_id);
     var go = function(z){ map.easeTo({ center: center, zoom: Math.min(z, 16) + 0.2 }); };

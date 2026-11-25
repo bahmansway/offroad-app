@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar, EmptyState, ErrorState, Icon, LoadingState, NavBar, PillButton, Txt, goBack, useTheme } from '../../components/ui';
 import { ActionSheet, MoreMenu, type SheetAction } from '../../components/ActionSheet';
@@ -37,18 +37,23 @@ export default function PostScreen() {
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
   const scroller = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
+  /** only the newest load may fill the page (coming back from edit, account switch, quick refocus) */
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const my = ++loadSeq.current;
     setError(null);
     try {
       const [p, cm] = await Promise.all([api.post(id), api.comments(id)]);
+      if (my !== loadSeq.current) return;
       setPost(p);
       setComments(cm.items);
       setCursor(cm.nextCursor);
     } catch (e) {
-      setError(e);
+      if (my === loadSeq.current) setError(e);
     }
   }, [id]);
-  useEffect(() => { load(); }, [load, user?.id]);
+  // every time the page shows again (e.g. after "Redaktə et"), and for another account
+  useFocusEffect(useCallback(() => { load(); }, [load, user?.id]));  // eslint-disable-line react-hooks/exhaustive-deps
 
   const patch = useCallback((p: Partial<Post>) => setPost((cur) => (cur ? { ...cur, ...p } : cur)), []);
   const removed = useCallback(() => goBack('/'), []);

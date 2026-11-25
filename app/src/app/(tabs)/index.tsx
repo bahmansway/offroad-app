@@ -18,8 +18,8 @@ import { useChat } from '../../lib/chat';
 import { useI18n } from '../../lib/i18n';
 import { useTheme } from '../../lib/themeContext';
 import { errorMessage } from '../../lib/errors';
-import { appendPage, patchPost, removePost, replaceWithFirstPage, shouldLoadMore } from '../../lib/postsLogic';
-import { clearFeedCache, pickTrips, readFeedCache, startsSuggested, writeFeedCache, type TripCard } from '../../lib/homeLogic';
+import { appendPage, patchPost, removeAuthor, removePost, replaceWithFirstPage, shouldLoadMore } from '../../lib/postsLogic';
+import { clearFeedCache, feedCacheGen, pickSuggestions, pickTrips, readFeedCache, startsSuggested, writeFeedCache, type TripCard } from '../../lib/homeLogic';
 import { bakuParts, dateBlock, formatEventWhen } from '../../lib/eventLogic';
 import { formatPoints } from '../../lib/leaderboardLogic';
 import { badgeText } from '../../lib/chatLogic';
@@ -49,31 +49,35 @@ export default function HomeScreen() {
   const [followingCount, setFollowingCount] = useState<number | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const seq = useRef(0);
+  /** trips + following count: only answers for the current account may land */
+  const sideSeq = useRef(0);
 
   const loadFirst = useCallback(async () => {
     const my = ++seq.current;
     setError(null);
     setMoreError(false);
     if (!userId) { setItems(null); return; }
+    const gen = feedCacheGen();
     try {
       const r = await api.feed();
       if (my !== seq.current) return;
       const list = replaceWithFirstPage(r.items);
       setItems(list);
       setCursor(r.nextCursor);
-      writeFeedCache(userId, list, r.nextCursor);
+      writeFeedCache(userId, list, r.nextCursor, gen);
     } catch (e) {
       if (my === seq.current) setError(e);
     }
   }, [userId]);
 
   const loadTrips = useCallback(async () => {
+    const my = sideSeq.current;
     try {
       const [mine, up] = await Promise.all([
         userId ? api.events({ scope: 'mine', limit: 20 }).catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
         api.events({ scope: 'upcoming', limit: 20 }).catch(() => ({ items: [] })),
       ]);
-      setTrips(pickTrips(mine.items, up.items));
+      if (my === sideSeq.current) setTrips(pickTrips(mine.items, up.items));
     } catch { /* the row just stays empty */ }
   }, [userId]);
 
@@ -86,6 +90,8 @@ export default function HomeScreen() {
     seq.current++;
     setItems(cc?.items ?? null);
     setCursor(cc?.cursor ?? null);
+    sideSeq.current++;
+    setTrips([]);
     setFollowingCount(null);
   }, [userId]);
 
@@ -93,7 +99,8 @@ export default function HomeScreen() {
     loadFirst();
     loadTrips();
     if (userId) {
-      api.user(userId).then((u) => setFollowingCount(u.followingCount ?? null)).catch(() => {});
+      const my = sideSeq.current;
+      api.user(userId).then((u) => { if (my === sideSeq.current) setFollowingCount(u.followingCount ?? null); }).catch(() => {});
       chat.refreshUnread();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,6 +130,12 @@ export default function HomeScreen() {
 
   const patch = useCallback((id: Id, p: Partial<Post>) => setItems((cur) => (cur ? patchPost(cur, id, p) : cur)), []);
   const drop = useCallback((id: Id) => setItems((cur) => (cur ? removePost(cur, id) : cur)), []);
+  // I blocked an author from a card: all their posts go at once, the cached page is stale, and the feed reloads
+  const blocked = useCallback((authorId: Id) => {
+    setItems((cur) => (cur ? removeAuthor(cur, authorId) : cur));
+    clearFeedCache();
+    loadFirst();
+  }, [loadFirst]);
 
   const headerH = insets.top + HEADER_ROW;
   const tabBarTop = Math.max(insets.bottom - 10, 0) + TAB_BAR.gap + TAB_BAR.height;
@@ -164,7 +177,7 @@ export default function HomeScreen() {
                 <Txt variant="footnote" tone="label2">{t('home.suggestedHint')}</Txt>
               </View>
             ) : null}
-            <PostCard post={item} onPatch={(p) => patch(item.id, p)} onRemoved={() => drop(item.id)} />
+            <PostCard post={item} onPatch={(p) => patch(item.id, p)} onRemoved={() => drop(item.id)} onBlocked={blocked} />
           </View>
         )}
         ListEmptyComponent={items === null ? (error ? <ErrorState message={errorMessage(error, t)} onRetry={loadFirst} /> : <LoadingState inline />) : undefined}
@@ -312,23 +325,21 @@ function Welcome({ name, onShare, myId }: { name: string; onShare: () => void; m
   useEffect(() => {
     let live = true;
     (async () => {
-      const [me, board, following] = await Promise.all([
+      const [me, board, following, blocks] = await Promise.all([
         api.user(myId).catch(() => null),
         api.leaderboard('month').catch(() => null),
         api.following(myId, { limit: 50 }).catch(() => null),
+        api.blocks().catch(() => null),
       ]);
-      const followed = new Set((following?.items ?? []).map((f) => String(f.user.id)));
-      const out: { id: Id; displayName: string; avatarUrl: string | null; why: string; isFollowing: boolean }[] = [];
-      const add = (u: { id: Id; displayName: string; avatarUrl: string | null }, why: string) => {
-        if (sameId(u.id, myId) || out.some((o) => sameId(o.id, u.id))) return;
-        out.push({ ...u, why, isFollowing: followed.has(String(u.id)) });
-      };
-      if (me?.clan) {
-        const m = await api.clanMembers(me.clan.id).catch(() => null);
-        m?.items.slice(0, 10).forEach((x) => add(x.user, t('home.clanMate', { clan: me.clan!.name })));
-      }
-      board?.items.filter((i) => !i.blocked).forEach((i) => add(i.user, t('home.activeMonth', { points: formatPoints(i.points, lang) })));
-      if (live) setPeople(out.filter((p) => !p.isFollowing).slice(0, 6));
+      const mates = me?.clan ? await api.clanMembers(me.clan.id).catch(() => null) : null;
+      const out = pickSuggestions({
+        myId,
+        clanMates: (mates?.items ?? []).slice(0, 10).map((x) => ({ user: x.user, why: t('home.clanMate', { clan: me!.clan!.name }) })),
+        board: (board?.items ?? []).map((i) => ({ user: i.user, blocked: i.blocked, why: t('home.activeMonth', { points: formatPoints(i.points, lang) }) })),
+        followingIds: (following?.items ?? []).map((f) => f.user.id),
+        blockedIds: (blocks?.items ?? []).map((b) => b.id),
+      });
+      if (live) setPeople(out);
     })();
     return () => { live = false; };
   }, [myId, t, lang]);

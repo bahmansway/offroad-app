@@ -15,9 +15,10 @@ import type { SheetAction } from '../ActionSheet';
 /**
  * Like / save / share / edit / delete / report / block for one post. Like and save are optimistic:
  * the screen changes at once and goes back if the server says no. `onPatch` gets the changed fields,
- * `onRemoved` is called after delete (or block: the post is hidden from me now).
+ * `onRemoved` is called after delete. After blocking the author `onBlocked(authorId)` runs (every post of theirs
+ * must go from the list); without it `onRemoved` is used.
  */
-export function usePostActions(post: Post, onPatch: (p: Partial<Post>) => void, onRemoved?: () => void) {
+export function usePostActions(post: Post, onPatch: (p: Partial<Post>) => void, onRemoved?: () => void, onBlocked?: (authorId: Post['author']['id']) => void) {
   const { t } = useI18n();
   const { user } = useAuth();
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
@@ -76,7 +77,7 @@ export function usePostActions(post: Post, onPatch: (p: Partial<Post>) => void, 
     if (!(await confirmAsync(t('profile.blockConfirm', { name: post.author.displayName }), t('profile.block'), t('common.cancel'), { destructive: true }))) return;
     try {
       await api.block(post.author.id);
-      onRemoved?.();
+      if (onBlocked) onBlocked(post.author.id); else onRemoved?.();
     } catch (e) {
       setNote({ text: errorMessage(e, t), error: true });
     }

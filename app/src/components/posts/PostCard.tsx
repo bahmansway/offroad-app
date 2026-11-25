@@ -18,12 +18,14 @@ import type { Post } from '../../lib/types';
  * One photo post. `variant="card"` = Home feed card (radius 26, 16 px margins, tap photo → post page);
  * `variant="detail"` = full-width top of the post page (whole caption, time row, no "all comments" link).
  */
-export function PostCard({ post, onPatch, onRemoved, variant = 'card', onComment, hideMenu }: {
+export function PostCard({ post, onPatch, onRemoved, onBlocked, variant = 'card', onComment, hideMenu }: {
   post: Post;
   /** detail page: the ··· lives in the nav bar instead */
   hideMenu?: boolean;
   onPatch: (p: Partial<Post>) => void;
   onRemoved?: () => void;
+  /** I blocked the author: drop all their posts */
+  onBlocked?: (authorId: Post['author']['id']) => void;
   variant?: 'card' | 'detail';
   /** detail page: focus the comment field */
   onComment?: () => void;
@@ -34,7 +36,7 @@ export function PostCard({ post, onPatch, onRemoved, variant = 'card', onComment
   const [index, setIndex] = useState(0);
   const [expanded, setExpanded] = useState(variant === 'detail');
   const [menuOpen, setMenuOpen] = useState(false);
-  const a = usePostActions(post, onPatch, onRemoved);
+  const a = usePostActions(post, onPatch, onRemoved, onBlocked);
   const card = variant === 'card';
   const time = timeAgo(post.createdAt, t);
   const open = () => router.push(`/post/${post.id}`);

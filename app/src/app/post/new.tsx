@@ -13,7 +13,7 @@ import { errorMessage } from '../../lib/errors';
 import { confirmAsync } from '../../lib/dialogs';
 import { successFeedback } from '../../lib/haptics';
 import { addPhotos, MAX_CAPTION, MAX_POST_PHOTOS, movePhoto, uploadProgress } from '../../lib/postsLogic';
-import { freshUpload, pickFromGallery, takePhoto, uploadPost, type PickedPhoto, type PickOutcome } from '../../lib/postUpload';
+import { discardDraft, freshUpload, pickFromGallery, takePhoto, uploadPost, type PickedPhoto, type PickOutcome } from '../../lib/postUpload';
 import { radius, type } from '../../lib/theme';
 
 /** "Yeni paylaşım": 1) pick up to 6 photos and order them (first = cover), 2) caption + car + road, 3) share. */
@@ -36,6 +36,8 @@ function NewPost() {
   const [failed, setFailed] = useState(false);
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const upload = useRef(freshUpload());
+  /** set synchronously, so a fast double tap on Paylaş can never start two uploads (state updates are async) */
+  const sharing = useRef(false);
 
   // a road given by the spot page: show its name
   useEffect(() => {
@@ -59,13 +61,17 @@ function NewPost() {
   };
 
   async function cancel() {
-    if (busy) return;
+    if (busy || sharing.current) return;
     if ((photos.length || caption.trim()) && !(await confirmAsync(t('post.new.discardConfirm'), t('post.new.discard'), t('common.cancel'), { destructive: true }))) return;
+    // a draft left by a failed try: delete it now (the server would only clear it after 24 h)
+    await discardDraft(upload.current);
+    upload.current = freshUpload();
     goBack('/');
   }
 
   async function share() {
-    if (busy || !photos.length) return;
+    if (sharing.current || busy || !photos.length) return;
+    sharing.current = true;
     setBusy(true);
     setError(null);
     setFailed(false);
@@ -84,6 +90,7 @@ function NewPost() {
       if (e instanceof ApiError && e.code === 'RATE_LIMITED') setError(t('post.new.rateLimited'));
       else if (e instanceof ApiError) setError(errorMessage(e, t, 'photo'));
       else setError(t('post.new.failed'));
+      sharing.current = false;
     } finally {
       setBusy(false);
     }

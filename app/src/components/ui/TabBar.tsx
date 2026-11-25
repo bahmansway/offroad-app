@@ -11,6 +11,8 @@ import { Txt } from './Text';
 
 /** The raised centre tab (v6: Söhbət). */
 export const CENTER_TAB = 'chat';
+/** How far the Söhbət circle rises above the bar. */
+export const RAISE = 22;
 
 /** Icon per route name. Add a line here when you add a tab. */
 export const TAB_ICONS: Record<string, IconName> = {
@@ -33,9 +35,11 @@ export function FloatingTabBar({ state, descriptors, emitter, navigateToTab }: B
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom, alignItems: 'center', paddingHorizontal: TAB_BAR.side }}>
       {/* The glass is a background layer so the raised centre button is not clipped by it. */}
-      <View style={{ height: TAB_BAR.height, width: '100%', maxWidth: 520 }}>
-        <GlassView elevated intensity={70} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: TAB_BAR.height / 2 }} />
-        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 }} accessibilityRole="tablist">
+      {/* The box is RAISE px taller than the glass: Android only delivers touches inside a view's own bounds,
+          so the whole raised Söhbət circle must sit inside its parents. The empty strip lets touches through. */}
+      <View pointerEvents="box-none" style={{ height: TAB_BAR.height + RAISE, width: '100%', maxWidth: 520 }}>
+        <GlassView elevated intensity={70} style={{ position: 'absolute', top: RAISE, left: 0, right: 0, bottom: 0, borderRadius: TAB_BAR.height / 2 }} />
+        <View pointerEvents="box-none" style={{ flex: 1, flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 4, paddingBottom: 4 }} accessibilityRole="tablist">
           {state.routes.map((route, index) => {
             const { options } = descriptors[route.key];
             const focused = state.index === index;
@@ -65,9 +69,9 @@ export function FloatingTabBar({ state, descriptors, emitter, navigateToTab }: B
             if (route.name === CENTER_TAB) {
               // Söhbət: 52 px circle raised 22 px with a 3 px ring in the page colour; orange when active.
               return (
-                <Pressable key={route.key} {...a11y} style={({ pressed }) => [{ flex: 1, height: 56, alignItems: 'center', justifyContent: 'flex-end', gap: 2 }, pressed && !focused && { opacity: 0.7 }]}>
+                <Pressable key={route.key} {...a11y} style={({ pressed }) => [{ flex: 1, height: 56 + RAISE, alignItems: 'center', justifyContent: 'flex-start', gap: 2 }, pressed && !focused && { opacity: 0.7 }]}>
                   <View style={{
-                    width: 52, height: 52, marginTop: -22, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
+                    width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
                     backgroundColor: focused ? c.tint : c.ink, borderWidth: 3, borderColor: c.bg,
                     shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, shadowOffset: { width: 0, height: 6 }, elevation: 6,
                   }}>

@@ -29,6 +29,7 @@ export default function SpotScreen() {
   const { user } = useAuth();
   const { data: spot, setData, error, loading, reload } = useAsync(() => api.spot(id), [id, user?.id]);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [rating, setRating] = useState(false);
   const nav = useNavigate();
   const [stripKey, setStripKey] = useState(0);
@@ -76,7 +77,9 @@ export default function SpotScreen() {
   const navigate = () => nav.open({ lat: spot.lat, lng: spot.lng, name: spot.name });
   async function share() {
     const r = await shareLink('spot', spot!.id, spot!.name);
-    if (r === 'copied') setActionError(null);
+    setActionError(null);
+    setNote(null);
+    if (r === 'copied') setNote(t('post.linkCopied'));
     if (r === 'failed') setActionError(t('post.shareFailed'));
   }
 
@@ -183,6 +186,7 @@ export default function SpotScreen() {
               />
             </View>
           </Section>
+          {note ? <Txt variant="footnote" tone="label2" center accessibilityLiveRegion="polite">{note}</Txt> : null}
           <FormError message={actionError} />
         </View>
       </ScrollView>

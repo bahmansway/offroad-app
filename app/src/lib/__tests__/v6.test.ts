@@ -295,3 +295,54 @@ describe('difficulty range taps', () => {
     expect(activeFilterCount([1, 3])).toBe(1);
   });
 });
+
+// ---------- review fixes ----------
+import { removeAuthor } from '../postsLogic';
+import { feedCacheGen, pickSuggestions } from '../homeLogic';
+import { discardDraft, freshUpload } from '../postUpload';
+import { ApiError } from '../apiClient';
+
+describe('v6 review fixes', () => {
+  it('blocking an author removes all of their posts', () => {
+    const l = [post('1'), { ...post('2'), author: { ...post('2').author, id: 'u2' } }, post('3')];
+    expect(removeAuthor(l, 'u1').map((p) => p.id)).toEqual(['2']);
+  });
+  it('old dates are shown in Baku time, whatever the phone zone', () => {
+    const en = (k: string, p?: Record<string, string | number>) => translate('en', k, p);
+    // 21:30 UTC on 10 Nov = 01:30 on 11 Nov in Baku
+    expect(timeAgo('2026-11-10T21:30:00Z', en, new Date('2026-11-25T12:00:00Z'))).toBe('11.11.2026');
+  });
+  it('follow suggestions never include me, people I follow, or blocked people', () => {
+    const u = (id: string) => ({ id, displayName: id, avatarUrl: null });
+    const r = pickSuggestions({
+      myId: 'me',
+      clanMates: [{ user: u('me'), why: 'clan' }, { user: u('mate'), why: 'clan' }, { user: u('iBlocked'), why: 'clan' }],
+      board: [{ user: u('mate'), blocked: false, why: 'b' }, { user: u('blocksMe'), blocked: true, why: 'b' }, { user: u('followed'), blocked: false, why: 'b' }, { user: u('active'), blocked: false, why: 'b' }],
+      followingIds: ['followed'],
+      blockedIds: ['iBlocked'],
+    });
+    expect(r.map((x) => `${x.id}:${x.why}`)).toEqual(['mate:clan', 'active:b']);
+  });
+  it('a feed page that was loading during logout is not cached', () => {
+    clearFeedCache();
+    const gen = feedCacheGen();
+    clearFeedCache(); // logout happened meanwhile
+    writeFeedCache('u1', [post('1')], null, gen);
+    expect(readFeedCache('u1')).toBeNull();
+    writeFeedCache('u1', [post('1')], null, feedCacheGen());
+    expect(readFeedCache('u1')).not.toBeNull();
+    clearFeedCache();
+  });
+  it('discarding a failed post deletes its draft (and copes with one already gone)', async () => {
+    const del = jest.fn().mockResolvedValue(undefined);
+    const st = { ...freshUpload(), draftId: 'd1', sent: ['0:a'] };
+    expect(await discardDraft(st, del)).toBe('deleted');
+    expect(del).toHaveBeenCalledWith('d1');
+    expect(st).toEqual(freshUpload());
+    const gone = { ...freshUpload(), draftId: 'd2' };
+    expect(await discardDraft(gone, jest.fn().mockRejectedValue(new ApiError(404, 'NOT_FOUND', 'x')))).toBe('gone');
+    expect(gone.draftId).toBeNull();
+    expect(await discardDraft(freshUpload(), del)).toBe('none');
+    expect(del).toHaveBeenCalledTimes(1);
+  });
+});

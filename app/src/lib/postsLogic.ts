@@ -1,4 +1,5 @@
 import { sameId } from './format';
+import { bakuParts } from './eventLogic';
 import type { FollowListItem, FollowState, Id, Post, PublicUser } from './types';
 
 /**
@@ -41,6 +42,11 @@ export function patchPost<T extends Post>(list: T[], id: Id, patch: Partial<Post
     return { ...p, ...patch };
   });
   return hit ? out : list;
+}
+
+/** After a block: every post by that author leaves the list. */
+export function removeAuthor<T extends Pick<Post, 'author'>>(list: T[], authorId: Id): T[] {
+  return list.filter((p) => !sameId(p.author.id, authorId));
 }
 
 export function removePost<T extends { id: Id }>(list: T[], id: Id): T[] {
@@ -113,7 +119,7 @@ export function uploadProgress(done: number, total: number, published: boolean):
 
 type T = (key: string, params?: Record<string, string | number>) => string;
 
-/** "indicə", "5 dəq", "3 saat", "2 gün", else a date. */
+/** "indicə", "5 dəq", "3 saat", "2 gün", else the Baku date (dd.mm.yyyy). */
 export function timeAgo(iso: string | null | undefined, t: T, now: Date = new Date()): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -126,8 +132,10 @@ export function timeAgo(iso: string | null | undefined, t: T, now: Date = new Da
   if (h < 24) return t('post.time.hours', { count: h });
   const days = Math.floor(h / 24);
   if (days < 7) return t('post.time.days', { count: days });
+  // the date in Baku (like every date in the app), not the phone's own zone
+  const b = bakuParts(d);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+  return `${pad(b.day)}.${pad(b.month + 1)}.${b.year}`;
 }
 
 // ---------- share links ----------

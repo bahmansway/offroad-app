@@ -125,7 +125,7 @@ const en = {
     emptyNearTitle: 'Nothing nearby yet',
     emptyNearText: 'Share a good spot you know.',
     addSpot: 'Add a spot',
-    mapLabel: 'Map of spots',
+    mapLabel: 'Map of spots. The same places are in the list below.',
     spotPin: '{{name}}, level {{level}}',
     campPin: '{{name}}, camp',
     openSpot: 'Open {{name}}',
@@ -1099,6 +1099,7 @@ const en = {
     createEvent: 'Create event',
   },
   post: {
+    editRate: 'Too many edits in an hour. Try again later.',
     linkCopied: 'Link copied',
     shareFailed: 'Could not share the link.',
     title: 'Post',

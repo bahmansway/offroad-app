@@ -127,7 +127,7 @@ const az: Dict = {
     emptyNearTitle: 'Yaxınlıqda yer yoxdur',
     emptyNearText: 'Bildiyin yaxşı yeri ilk sən paylaş.',
     addSpot: 'Yer əlavə et',
-    mapLabel: 'Yerlərin xəritəsi',
+    mapLabel: 'Yerlərin xəritəsi. Eyni yerlər aşağıdakı siyahıdadır.',
     spotPin: '{{name}}, səviyyə {{level}}',
     campPin: '{{name}}, düşərgə',
     openSpot: '{{name}} — aç',
@@ -1101,6 +1101,7 @@ const az: Dict = {
     createEvent: 'Tədbir yarat',
   },
   post: {
+    editRate: 'Bir saatda çox redaktə. Bir az sonra yenə yoxla.',
     linkCopied: 'Link kopyalandı',
     shareFailed: 'Linki paylaşmaq olmadı.',
     title: 'Paylaşım',

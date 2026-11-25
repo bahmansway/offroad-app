@@ -46,6 +46,9 @@ export function startsSuggested(items: Pick<Post, 'suggested'>[], i: number): bo
  */
 interface Cached { userId: Id; items: Post[]; cursor: string | null; at: number }
 let memory: Cached | null = null;
+/** Bumped by clearFeedCache (logout / lost session): a feed request that started before must not write. */
+let cacheGen = 0;
+export const feedCacheGen = () => cacheGen;
 const KEY = 'offroad.feed1';
 
 export function readFeedCache(userId: Id | null | undefined): Cached | null {
@@ -61,7 +64,8 @@ export function readFeedCache(userId: Id | null | undefined): Cached | null {
   return null;
 }
 
-export function writeFeedCache(userId: Id, items: Post[], cursor: string | null) {
+export function writeFeedCache(userId: Id, items: Post[], cursor: string | null, gen: number = cacheGen) {
+  if (gen !== cacheGen) return; // logged out (or session lost) while this page was loading
   memory = { userId, items: items.slice(0, 20), cursor, at: Date.now() };
   if (Platform.OS === 'web') {
     try { globalThis.localStorage?.setItem(KEY, JSON.stringify(memory)); } catch { /* ignore */ }
@@ -69,8 +73,39 @@ export function writeFeedCache(userId: Id, items: Post[], cursor: string | null)
 }
 
 export function clearFeedCache() {
+  cacheGen++;
   memory = null;
   if (Platform.OS === 'web') {
     try { globalThis.localStorage?.removeItem(KEY); } catch { /* ignore */ }
   }
+}
+
+// ---------- "Sürücüləri izlə" suggestions ----------
+
+export interface Suggestion { id: Id; displayName: string; avatarUrl: string | null; why: string; isFollowing: boolean }
+type Person = { id: Id; displayName: string; avatarUrl: string | null };
+
+/**
+ * Clan mates first, then this month's most active drivers. Never me, never anyone I follow already,
+ * never anyone blocked either way (people I blocked, leaderboard rows marked `blocked`). At most `max`.
+ */
+export function pickSuggestions(o: {
+  myId: Id;
+  clanMates: { user: Person; why: string }[];
+  board: { user: Person; blocked: boolean; why: string }[];
+  followingIds: Id[];
+  blockedIds: Id[];
+  max?: number;
+}): Suggestion[] {
+  const skip = new Set([String(o.myId), ...o.followingIds.map(String), ...o.blockedIds.map(String)]);
+  const out: Suggestion[] = [];
+  const add = (u: Person, why: string) => {
+    const k = String(u.id);
+    if (skip.has(k)) return;
+    skip.add(k);
+    out.push({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl, why, isFollowing: false });
+  };
+  o.clanMates.forEach((x) => add(x.user, x.why));
+  o.board.filter((x) => !x.blocked).forEach((x) => add(x.user, x.why));
+  return out.slice(0, o.max ?? 6);
 }
